@@ -1,0 +1,11 @@
+{
+  "name": "Swatea AI",
+  "description": "Enterprise AI Operating System featuring AI Chat, Deep Search, Coding Studio, Document AI, Vision, Voice Assistant, Workflow Automation, and Team Analytics.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
