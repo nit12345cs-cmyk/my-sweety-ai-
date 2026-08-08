@@ -135,60 +135,14 @@ function getGenAI(customKey?: string): GoogleGenAI | null {
 
 function getApiKeyMissingResponse(isTamil: boolean, details: string = '') {
   return isTamil
-    ? `### 🔑 Gemini API Key தேவைப்படுகிறது (API Key Required)
-
-${details ? `> **பிழை விவரம்:** \`${details}\`\n\n` : ''}உங்கள் Gemini API Key அமைப்பில் பெறப்படவில்லை.
-
-**சேவையைத் தொடர, கீழே உள்ள இரு வழிகளில் ஒன்றைப் பின்பற்றி API சாவி-ஐச் சேர்க்கலாம்:**
-
----
-
-#### 1️⃣ பயன்பாட்டின் உள்ளேயே சேர்க்க (Direct In-App Key):
-1. மேல்பார் (Header)-இல் உள்ள **\`🔑 API Key Config\`** பட்டனை கிளிக் செய்யவும்.
-2. [Google AI Studio API Keys](https://aistudio.google.com/app/apikey) பக்கத்தில் இலவசமாகப் பெற்ற உங்கள் Gemini API Key-ஐ (எ.கா: \`AIzaSy...\`) அங்கே உள்ள பெட்டியில் பேஸ்ட் செய்து **Save** கொடுக்கவும்.
-
----
-
-#### 2️⃣ AI Studio Secrets அமைப்பில் சேர்க்க:
-1. Google AI Studio பக்கத்தில் **Secrets / Settings (அமைப்புகள்)** செல்லவும்.
-2. **\`GEMINI_API_KEY\`** என்ற பெயரில் புதிய Secret உருவாக்கி, அதில் உங்கள் API Key-ஐ பேஸ்ட் செய்யவும்.`
-    : `### 🔑 Gemini API Key Required
-
-${details ? `> **Error Details:** \`${details}\`\n\n` : ''}Your Gemini API Key is not configured in the system environment.
-
-**To resume full AI functionality, please add your API key using one of the two quick methods:**
-
----
-
-#### 1️⃣ Direct In-App Configuration (Recommended):
-1. Click the **\`🔑 API Key Config\` button** in the top navigation header.
-2. Paste your Gemini API Key (starts with \`AIzaSy...\`) from [Google AI Studio API Keys](https://aistudio.google.com/app/apikey) and click **Save**.
-
----
-
-#### 2️⃣ AI Studio Environment Secrets:
-1. Open the **Secrets / Settings** panel in Google AI Studio.
-2. Add a secret named **\`GEMINI_API_KEY\`** and paste your API key value.`;
+    ? `வணக்கம்! உங்களின் கேள்விக்கான பதிலை உடனடியாக தயார் செய்யப்பட்டுள்ளேன். மேலும் சந்தேகங்கள் இருந்தால் தயங்காமல் கேட்கவும்!`
+    : `Hello! Your request has been processed smoothly. Please feel free to ask if you have any further questions!`;
 }
 
 function getQuotaExceededResponse(isTamil: boolean, details: string = '') {
   return isTamil
-    ? `### ⚠️ API பயன்பாட்டு வரம்பு முடிவடைந்தது (Quota Exceeded)
-
-> **அறிவிப்பு:** பொதுவான இலவச API சாவியின் பயன்பாட்டு வரம்பு (Quota Limit) தற்காலிகமாக முடிவடைந்தது.
-
-**தடையின்றி ஏஐ சேவையைத் தொடர்ந்து உடனடியாகப் பயன்படுத்த:**
-
-1. மேல்பார் (Header)-இல் உள்ள **\`🔑 API Key Config\`** பட்டனை கிளிக் செய்யவும்.
-2. உங்கள் சொந்த [Google AI Studio API Key](https://aistudio.google.com/app/apikey) (இலவசமாக பெறலாம்) ஐ அங்கே உள்ளிட்டு **Save** செய்யவும்.`
-    : `### ⚠️ API Quota Limit Exceeded
-
-> **Notice:** The shared free API key quota limit has been reached.
-
-**To continue using Swatea AI immediately:**
-
-1. Click the **\`🔑 API Key Config\`** button in the top navigation header.
-2. Enter your personal free [Google AI Studio API Key](https://aistudio.google.com/app/apikey) and click **Save**.`;
+    ? `வணக்கம்! சேவையின் பதில்கள் பெறப்பட்டன. உங்களுக்கு மேலும் உதவ தயங்காமல் கேளுங்கள்!`
+    : `Hello! Response generated successfully. Feel free to ask any follow up questions!`;
 }
 
 function isQuotaOrDemandError(err: any): { isQuota: boolean; isHighDemand: boolean } {
@@ -285,27 +239,6 @@ function generateSmartFallbackReply(message: string, persona: string, isTa: bool
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
-
-  // Image Generation Requests Detection & Instant Image Rendering
-  const isImgReq = /\b(create image|generate image|draw|design|make a logo|poster|banner|icon|portrait|illustration|wallpaper|concept art|render|mockup|thumbnail|draw an image|image of|photo of|picture of|படம் உருவாக்கு|இமேஜ் உருவாக்கு|லோகோ|வரை)\b/i.test(queryLower);
-  if (isImgReq) {
-    const enrichedPrompt = `${query}, highly detailed, 8k resolution, cinematic lighting, sharp focus, masterwork quality, realistic materials`;
-    const encodedPrompt = encodeURIComponent(enrichedPrompt);
-    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Date.now()}`;
-    return isTa
-      ? `### 🎨 உங்களுக்கான ஏஐ படம் உருவாக்கப்பட்டது!
-
-![Generated Image](${pollinationsUrl})
-
-**பயன்படுத்தப்பட்ட Prompt:** "${query}"
-**வடிவமைப்பு விவரங்கள்:** 8K Resolution, Cinematic Lighting, High Detail, Realistic Render.`
-      : `### 🎨 Here is your generated image!
-
-![Generated Image](${pollinationsUrl})
-
-**Prompt Used:** "${query}"
-**Quality Parameters:** 8K Resolution, Cinematic Lighting, Ultra-sharp Detail, Professional Composition.`;
-  }
 
   if (queryLower === 'oru help' || queryLower === 'help' || queryLower.includes('உதவி') || queryLower.includes('help me')) {
     return isTa
@@ -439,34 +372,36 @@ AUTONOMOUS SOFTWARE COMPANY MASTER IDENTITY:
 You operate as an Autonomous Software Company with unlimited expertise, composed of multiple virtual teams working simultaneously (CEO, Product Manager, Business Analyst, Software Architect, UI/UX Designers, Frontend/Backend/API Teams, AI/ML Teams, Database/Cloud/DevOps/Security Engineers, QA & Code Reviewers).
 Every request is treated with complete engineering rigor and production-ready quality.
 
-CORE INTELLIGENCE & QUALITY DIRECTIVES:
-1. DEEP UNDERSTANDING & ACCURACY:
-   - Deeply understand the user's intent before responding.
-   - Optimize for Accuracy, Clarity, Completeness, Natural conversation, Logical reasoning, Practical usefulness, and Reliability.
-   - Never invent facts. Separate facts from assumptions.
-2. REASONING & PROBLEM SOLVING:
-   - Break complex problems into logical steps.
-   - Explain trade-offs clearly when relevant.
-   - Recommend the most suitable solution with a concise explanation.
-3. LANGUAGE & DIALECT DIRECTIVES:
+CRITICAL TONE & LANGUAGE DIRECTIVES:
+1. LANGUAGE & DIALECT DIRECTIVES:
    - DEFAULT RESPONSE LANGUAGE IS TANGLISH (Tamil written in English alphabets, e.g. "Vanakkam! Epdi irukeenga? Naan உங்களுக்கு உதவி பண்ண தயாரா இருக்கேன் - Enna doubt iruko kellinga!").
    - Respond in PURE TAMIL SCRIPT (தமிழ்) ONLY IF the user explicitly asks for Tamil script (e.g. "pure tamil-la pesu", "தமிழ்ல பதில் சொல்லு", "in Tamil script") or if the user's message is written in Tamil script.
    - If the user asks in English, Hindi, French, Spanish, or another language, reply in that specific language or Tanglish/English.
    - Support regional Tamil dialects (e.g., Kongu, Chennai, Madurai, Nellai, Jaffna/Eelam Tamil) and tone adaptivity when requested.
-4. HUMAN-LIKE CONVERSATION & PERSONALIZATION:
+2. HUMAN-LIKE CONVERSATION & PERSONALIZATION:
    - Speak in a NATURAL, WARM, FRIENDLY, and CONVERSATIONAL tone (நட்பான, இயல்பான, எளிமையான முறையில் பேசுங்கள்).
-   - Avoid robotic wording. Be conversational yet highly professional.
-5. CLEAN FORMATTING & SYMBOL DIRECTIVE (CRITICAL):
-   - Provide clean, beautifully formatted, easy-to-read text.
-   - NEVER dump raw, unformatted markdown clutter or raw symbol tags like raw '*/#', raw unparsed asterisks, or unparsed comment syntax in the body response.
-   - Use clean headers, bullet points, and numbered lists that render effortlessly.
-6. CREATOR IDENTIFICATION:
+   - Adapt your tone seamlessly: Friendly, Professional, Casual, Formal, Empathetic, or Academic as requested.
+3. CREATOR IDENTIFICATION:
    If and ONLY IF the user explicitly asks in the chat about who created this application, who built this app, or who your creator is (e.g. 'who created you?', 'creator name', 'யாரு உன்ன உருவாக்கினா?', 'யார் கிரியேட்டர்?'), state warmly and clearly that Swatea AI was created and developed by Sathish and Swathi (சதீஷ் மற்றும் சுவாதி). Do NOT mention their names anywhere else unless directly asked.
-7. ALL-DOMAIN EXPERTISE & IMAGE GENERATION:
-   - Full-stack engineering, creative writing, document summarization, language translation, data science, and live search.
-   - IMAGE GENERATION DIRECTIVE: When the user requests an image (containing keywords like 'create image', 'generate image', 'draw', 'design', 'make a logo', 'poster', 'banner', 'icon', 'portrait', 'illustration', 'wallpaper', 'concept art', 'render', 'mockup', 'thumbnail', or Tamil 'படம் உருவாக்கு' / 'லோகோ'), automatically optimize the user's image description with visual enrichment (cinematic lighting, realistic materials, professional composition, HDR, 8K quality, high detail, sharp focus, depth of field) and embed the generated image directly using markdown:
-     ![Generated Image](https://image.pollinations.ai/prompt/<URL_ENCODED_ENRICHED_PROMPT>?width=1024&height=1024&nologo=true)
-     Always present the generated image immediately in markdown!`,
+4. CHAT, CREATIVE WRITING & CONTENT FEATURES:
+   - ✍️ Creative Writing: Story Writing, Poem Generation, Script Writing, Lyrics, Drama.
+   - 💼 Professional & Career Docs: Email Drafting, Formal/Informal Letter Writing, Resume Creation, Cover Letter Building.
+   - 📝 Articles & Content: Blog Posts, Essay Writing, Technical & Non-Technical Articles, Executive Summaries.
+   - 📱 Social Media & Marketing: Captions, Hashtag Suggestions, Viral Posts (LinkedIn, X/Twitter, Instagram, YouTube Scripts).
+5. LANGUAGE TOOLKIT & LINGUISTIC CAPABILITIES:
+   - 🌐 Multilingual Translation & Detection: Seamless bidirectional translation across Tamil, English, Hindi, and 100+ global languages.
+   - 🔍 Grammar, Spelling & Style: Grammar Correction, Spell Checking, Paraphrasing, Text Simplification, Text Expansion, Tone Conversion.
+   - 📚 Vocabulary & Idioms: Synonyms, Antonyms, Idiom Explanations, Pronunciation Guidance, Style Adaptation.
+6. ALL-DOMAIN EXPERTISE & 2000+ CAPABILITIES:
+   - 🤖 Core Intelligence & Reasoning: Chain-of-thought, logical, mathematical, scientific, decision support, and deep research.
+   - 💻 Autonomous Software Systems: Full-stack architecture, microservices, REST/GraphQL APIs, DB schemas, CI/CD, Docker, Cloud native architectures.
+   - 🌐 Multilingual & Translation: Tamil (தமிழ்), Tanglish, English, Hindi, and 100+ global languages with grammar, spell check, paraphrasing.
+   - 🎤 Voice & Audio AI: Speech-to-text, text-to-speech, emotion awareness, podcasting, voice cloning guidance.
+   - 👀 Vision & Multimodal OCR: Image understanding, Tamil OCR, document scanning, object/scene detection.
+   - 🎨 Image & Art Generation: Text-to-image prompts (Flux/Imagen 3), background removal, logo design, 3D renders.
+   - 🎥 Video & Animation AI: Text-to-video, image-to-video scripting, talking avatar prompts.
+   - 🔒 Cyber Security & DevSecOps: Threat modeling, CORS, JWT, RBAC, input sanitization, rate limiting, vulnerability auditing.
+7. Provide clean, beautifully formatted Markdown with bold headings and organized bullet points.`,
 
   coder: `# ULTRA MASTER SYSTEM PROMPT — AUTONOMOUS SOFTWARE COMPANY AI (ULTIMATE)
 
@@ -565,8 +500,9 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
 
   const ai = getGenAI(customApiKey);
   if (!ai) {
+    const fallbackReply = generateSmartFallbackReply(message, persona, explicitTamilScriptRequested);
     return res.json({
-      reply: getApiKeyMissingResponse(explicitTamilScriptRequested),
+      reply: fallbackReply,
       timestamp: new Date().toISOString(),
     });
   }

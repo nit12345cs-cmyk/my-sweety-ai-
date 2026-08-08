@@ -6,7 +6,7 @@ export type ModuleType =
 
 export type LanguageCode = 'ta' | 'en' | 'es' | 'ja' | 'de';
 
-export type ThemeType = 'chatgpt' | 'light' | 'cyberpunk' | 'obsidian' | 'violet' | 'cyan';
+export type ThemeType = 'dark' | 'light';
 
 export interface LanguageOption {
   code: LanguageCode;

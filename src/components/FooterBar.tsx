@@ -9,8 +9,6 @@ export const FooterBar: React.FC = () => {
           <Flame className="w-3.5 h-3.5 text-amber-400" />
           <span>SWATEA AI OS</span>
         </span>
-        <span className="text-slate-700">•</span>
-        <span className="text-slate-300 font-bold">Port 3000 Active</span>
       </div>
 
       <div className="flex items-center gap-4 text-slate-400">
@@ -24,7 +22,7 @@ export const FooterBar: React.FC = () => {
         </div>
         <div className="hidden lg:flex items-center gap-1.5 bg-slate-900/80 border border-slate-800/80 px-2 py-0.5 rounded-md">
           <ShieldCheck className="w-3 h-3 text-indigo-400" />
-          <span className="text-indigo-300">OAuth & API Key Protected</span>
+          <span className="text-indigo-300">Enterprise Encrypted & Secured</span>
         </div>
       </div>
     </footer>

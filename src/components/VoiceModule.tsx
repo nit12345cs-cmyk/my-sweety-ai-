@@ -3,7 +3,6 @@ import { Mic, Volume2, Play, Square, Sparkles, Radio, Activity } from 'lucide-re
 import { LanguageCode } from '../types';
 import { safeFetchJson } from '../lib/api';
 import { speakNaturalText, stopSpeech } from '../lib/tts';
-import { AiOrb } from './AiOrb';
 
 interface VoiceModuleProps {
   language: LanguageCode;
@@ -90,14 +89,14 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#080a16]/65 backdrop-blur-2xl rounded-3xl border border-white/10 overflow-y-auto p-4 sm:p-6 space-y-6 shadow-2xl">
+    <div className="h-full flex flex-col bg-slate-950 rounded-2xl border border-slate-800/80 overflow-y-auto p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2.5 font-mono">
-          <Mic className="w-6 h-6 text-cyan-400" />
+        <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+          <Mic className="w-6 h-6 text-amber-400" />
           <span>{isTamil ? 'குரல் உதவி & ஸ்பீச் AI' : 'Swatea AI Voice Assistant'}</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-1 font-sans">
+        <p className="text-xs text-slate-400 mt-1">
           {isTamil
             ? 'ஜெமினி TTS மாதிரி மூலம் உங்கள் உரையை இயற்கை குரலில் ஒலிக்கச் செய்யுங்கள்.'
             : 'Convert enterprise prompts to natural human speech using Gemini 3.1 Flash TTS.'}
@@ -106,7 +105,7 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Input & Voice Controls */}
-        <div className="lg:col-span-2 space-y-4 bg-white/[0.02] p-5 rounded-2xl border border-white/10">
+        <div className="lg:col-span-2 space-y-4 bg-slate-900/50 p-5 rounded-2xl border border-slate-800">
           <div>
             <label className="text-xs font-bold text-slate-300 block mb-1">
               {isTamil ? 'ஒலிக்க வேண்டிய உரை (Text Prompt):' : 'Speech Text Prompt:'}
@@ -115,7 +114,7 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={4}
-              className="w-full bg-[#030510] border border-white/10 rounded-xl p-3.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-sans transition-all"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-sans"
             />
           </div>
 
@@ -127,7 +126,7 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
               <select
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
-                className="w-full bg-[#030510] border border-white/10 text-slate-200 text-xs rounded-xl p-3 focus:outline-none focus:border-cyan-500 font-mono"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-500 font-mono"
               >
                 <option value="Aoede">Aoede (Sweet & Soft Natural Female)</option>
                 <option value="Leda">Leda (Warm & Smooth Female Voice)</option>
@@ -145,7 +144,7 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
               <select
                 value={cheerfulness}
                 onChange={(e) => setCheerfulness(e.target.value)}
-                className="w-full bg-[#030510] border border-white/10 text-slate-200 text-xs rounded-xl p-3 focus:outline-none focus:border-cyan-500 font-mono"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-500 font-mono"
               >
                 <option value="cheerful">Cheerful & Energetic</option>
                 <option value="professional">Professional & Formal</option>
@@ -158,14 +157,14 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
           <button
             onClick={handleSynthesizeAndPlay}
             disabled={loading || isPlaying}
-            className="w-full py-3.5 bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-black rounded-2xl disabled:opacity-50 transition-all text-xs flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(6,182,212,0.3)] cursor-pointer"
+            className="w-full py-3 bg-gradient-to-r from-amber-500 to-rose-600 text-slate-950 font-bold rounded-xl hover:brightness-110 disabled:opacity-50 transition-all text-xs flex items-center justify-center gap-2 shadow-lg"
           >
             {loading ? (
               <Sparkles className="w-4 h-4 animate-spin" />
             ) : isPlaying ? (
               <Volume2 className="w-4 h-4 animate-bounce" />
             ) : (
-              <Play className="w-4 h-4 fill-white" />
+              <Play className="w-4 h-4 fill-slate-950" />
             )}
             <span>
               {loading
@@ -177,32 +176,37 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
           </button>
         </div>
 
-        {/* Visualizer Side Card with AI Orb */}
-        <div className="bg-white/[0.02] p-5 rounded-2xl border border-white/10 flex flex-col justify-between items-center text-center space-y-4">
-          <div className="w-full flex items-center justify-between border-b border-white/10 pb-2">
-            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5 font-mono">
-              <Radio className="w-4 h-4 text-cyan-400" />
-              <span>Voice Core Orb</span>
+        {/* Visualizer Side Card */}
+        <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 flex flex-col justify-between items-center text-center space-y-4">
+          <div className="w-full flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Radio className="w-4 h-4 text-amber-400" />
+              <span>Audio Status</span>
             </span>
-            <span className="text-[10px] font-mono text-cyan-400">24kHz PCM</span>
+            <span className="text-[10px] font-mono text-amber-400">24kHz PCM</span>
           </div>
 
-          <div className="py-4 space-y-4 flex flex-col items-center">
-            <AiOrb
-              state={loading ? 'thinking' : isPlaying ? 'speaking' : 'idle'}
-              size="lg"
-            />
-
-            <div className="text-xs font-black text-slate-200 font-mono">
-              {loading ? 'Synthesizing Audio...' : isPlaying ? 'Voice Stream Active' : 'Voice Orb Idle / Ready'}
+          <div className="py-6 space-y-3">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-amber-500 via-rose-600 to-indigo-600 p-1 mx-auto shadow-xl">
+              <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center">
+                {isPlaying ? (
+                  <Activity className="w-8 h-8 text-amber-400 animate-pulse" />
+                ) : (
+                  <Volume2 className="w-8 h-8 text-slate-500" />
+                )}
+              </div>
             </div>
-            <p className="text-[11px] text-slate-400 max-w-xs">
-              Direct PCM audio streaming with web audio context.
+
+            <div className="text-xs font-bold text-slate-200">
+              {isPlaying ? 'Audio Output Active' : 'Idle / Ready'}
+            </div>
+            <p className="text-[11px] text-slate-500 max-w-xs">
+              Direct PCM streaming from Gemini TTS preview engine with web audio context.
             </p>
           </div>
 
-          <div className="w-full bg-[#030510] p-2.5 rounded-xl border border-white/10 flex items-center justify-center gap-1.5 text-[10px] font-mono text-cyan-300">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+          <div className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-center gap-1.5 text-[10px] font-mono text-emerald-400">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
             <span>gemini-3.1-flash-tts-preview</span>
           </div>
         </div>
@@ -210,4 +214,3 @@ export const VoiceModule: React.FC<VoiceModuleProps> = ({ language }) => {
     </div>
   );
 };
-

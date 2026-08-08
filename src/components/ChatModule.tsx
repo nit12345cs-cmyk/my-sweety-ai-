@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Send,
   Sparkles,
@@ -37,15 +39,13 @@ import {
   Smartphone,
   Tablet
 } from 'lucide-react';
-import { ChatMessage, ChatSession, LanguageCode, ThemeType } from '../types';
+import { ChatMessage, ChatSession, LanguageCode } from '../types';
 import { safeFetchJson } from '../lib/api';
 import { speakNaturalText, stopSpeech } from '../lib/tts';
-import { AiOrb } from './AiOrb';
 
 interface ChatModuleProps {
   language: LanguageCode;
   currentUserEmail?: string;
-  currentTheme?: ThemeType;
 }
 
 interface InteractiveWebsiteBlockProps {
@@ -210,56 +210,27 @@ const InteractiveWebsiteBlock: React.FC<InteractiveWebsiteBlockProps> = ({
   );
 };
 
-export const ChatModule: React.FC<ChatModuleProps> = ({
-  language,
-  currentUserEmail = 'guest@swatea.ai',
-  currentTheme = 'chatgpt',
-}) => {
+export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEmail = 'guest@swatea.ai' }) => {
   const isTamil = language === 'ta';
-  const isLightMode = currentTheme === 'chatgpt' || currentTheme === 'light';
   const userKey = currentUserEmail.toLowerCase().trim();
   const storageKey = `swatea_chats_${userKey}`;
   const historyKey = `swatea_history_${userKey}`;
-  const activeSessionKey = `swatea_active_session_${userKey}`;
+  const activeSessionKey = `swatea_active_session_id_${userKey}`;
 
-  // Helper to deduplicate chat sessions by ID and content fingerprint
-  const deduplicateSessions = (sessions: ChatSession[]): ChatSession[] => {
-    const seenIds = new Set<string>();
-    const seenFingerprints = new Set<string>();
-    const result: ChatSession[] = [];
-
-    for (const session of sessions) {
-      if (!session || !session.id) continue;
-      if (seenIds.has(session.id)) continue;
-
-      const msgs = session.messages || [];
-      const firstUserMsg = msgs.find((m) => m.role === 'user')?.content || '';
-      const lastMsg = msgs[msgs.length - 1]?.content || '';
-      const fingerprint = `${session.title}_${msgs.length}_${firstUserMsg.slice(0, 50)}_${lastMsg.slice(0, 50)}`;
-
-      if (msgs.length > 0 && seenFingerprints.has(fingerprint)) {
-        continue;
-      }
-
-      seenIds.add(session.id);
-      if (msgs.length > 0) {
-        seenFingerprints.add(fingerprint);
-      }
-      result.push(session);
-    }
-    return result;
-  };
-
-  // Active session ID initialized from localStorage if available
+  // Active session ID persisted across page reloads to prevent duplicate history sessions
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
-      const savedId = localStorage.getItem(activeSessionKey);
-      if (savedId) return savedId;
-    } catch (err) {
-      console.error('Error loading active session id:', err);
-    }
+      const saved = localStorage.getItem(activeSessionKey);
+      if (saved) return saved;
+    } catch (e) {}
     return `session_${Date.now()}`;
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(activeSessionKey, activeSessionId);
+    } catch (e) {}
+  }, [activeSessionId, activeSessionKey]);
 
   // Input & UI States
   const [input, setInput] = useState('');
@@ -288,18 +259,28 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Saved Chat Sessions Archive with auto-deduplication
+  // Saved Chat Sessions Archive (Deduplicated on initial load)
   const [savedSessions, setSavedSessions] = useState<ChatSession[]>(() => {
     try {
       const saved = localStorage.getItem(historyKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          const clean = deduplicateSessions(parsed);
-          if (clean.length !== parsed.length) {
-            safeStorageSet(historyKey, clean);
+          const seenIds = new Set<string>();
+          const seenTitles = new Set<string>();
+          const deduplicated: ChatSession[] = [];
+          for (const item of parsed) {
+            if (item && item.id && !seenIds.has(item.id)) {
+              const cleanTitle = (item.title || '').trim().toLowerCase();
+              if (cleanTitle && seenTitles.has(cleanTitle)) {
+                continue; // Skip duplicate session with same title
+              }
+              if (cleanTitle) seenTitles.add(cleanTitle);
+              seenIds.add(item.id);
+              deduplicated.push(item);
+            }
           }
-          return clean;
+          return deduplicated;
         }
       }
     } catch (err) {
@@ -308,9 +289,46 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
     return [];
   });
 
-  // History Drawer & Search
-  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
-  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  // Dispatch custom event to keep Left Sidebar synced with ChatModule history
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('swatea:history_updated', {
+        detail: { savedSessions, activeSessionId },
+      })
+    );
+  }, [savedSessions, activeSessionId]);
+
+  // Listen for actions dispatched from Left Sidebar
+  useEffect(() => {
+    const handleNewChat = () => {
+      startNewChat();
+    };
+    const handleLoadSession = (e: any) => {
+      if (e.detail) {
+        loadSession(e.detail);
+      }
+    };
+    const handleDeleteSession = (e: any) => {
+      if (e.detail) {
+        deleteSession(e.detail);
+      }
+    };
+    const handleClearHistory = () => {
+      clearAllHistory();
+    };
+
+    window.addEventListener('swatea:new_chat', handleNewChat);
+    window.addEventListener('swatea:load_session', handleLoadSession);
+    window.addEventListener('swatea:delete_session', handleDeleteSession);
+    window.addEventListener('swatea:clear_history', handleClearHistory);
+
+    return () => {
+      window.removeEventListener('swatea:new_chat', handleNewChat);
+      window.removeEventListener('swatea:load_session', handleLoadSession);
+      window.removeEventListener('swatea:delete_session', handleDeleteSession);
+      window.removeEventListener('swatea:clear_history', handleClearHistory);
+    };
+  }, []);
 
   // Speech synthesis states
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -424,12 +442,8 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
     }
   };
 
-  // Auto-save messages and sync active session ID to localStorage
+  // Auto-save messages to localStorage whenever messages change
   useEffect(() => {
-    try {
-      localStorage.setItem(activeSessionKey, activeSessionId);
-    } catch (e) {}
-
     if (messages.length > 0) {
       const sanitizedCurrent = sanitizeMessages(messages);
       safeStorageSet(storageKey, sanitizedCurrent);
@@ -446,45 +460,34 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
 
     setSavedSessions((prev) => {
       const sanitizedCurrentMsgs = sanitizeMessages(messages);
-      let idx = prev.findIndex((s) => s.id === activeSessionId);
+      
+      // Look for existing session by activeSessionId OR identical title
+      const existingIdx = prev.findIndex(
+        (s) => s.id === activeSessionId || (s.title && s.title.toLowerCase() === sessionTitle.toLowerCase())
+      );
 
-      // Fallback deduplication: check if an identical conversation is already saved
-      if (idx === -1) {
-        const firstUserContent = sanitizedCurrentMsgs.find((m) => m.role === 'user')?.content || '';
-        const lastContent = sanitizedCurrentMsgs[sanitizedCurrentMsgs.length - 1]?.content || '';
-
-        idx = prev.findIndex((s) => {
-          if (!s.messages || s.messages.length !== sanitizedCurrentMsgs.length) return false;
-          const sFirstUser = s.messages.find((m) => m.role === 'user')?.content || '';
-          const sLast = s.messages[s.messages.length - 1]?.content || '';
-          return sFirstUser === firstUserContent && sLast === lastContent;
-        });
-
-        if (idx >= 0) {
-          setActiveSessionId(prev[idx].id);
-        }
-      }
-
-      if (idx >= 0) {
-        const existing = prev[idx];
+      if (existingIdx >= 0) {
+        const existing = prev[existingIdx];
         if (
+          existing.id === activeSessionId &&
           existing.messages.length === sanitizedCurrentMsgs.length &&
           existing.messages[existing.messages.length - 1]?.content ===
             sanitizedCurrentMsgs[sanitizedCurrentMsgs.length - 1]?.content
         ) {
-          return prev; // Same content, prevent duplicate update
+          return prev; // Same content, prevent unnecessary state update and re-render
         }
 
         const updated = [...prev];
-        updated[idx] = {
-          ...updated[idx],
-          title: updated[idx].title || sessionTitle,
+        updated[existingIdx] = {
+          ...existing,
+          id: activeSessionId, // unify ID
+          title: existing.title || sessionTitle,
           updatedAt: nowStr,
           messages: sanitizedCurrentMsgs,
         };
-        const clean = deduplicateSessions(updated).slice(0, 15);
-        safeStorageSet(historyKey, clean);
-        return clean;
+        const limited = updated.slice(0, 20);
+        safeStorageSet(historyKey, limited);
+        return limited;
       } else {
         const newSession: ChatSession = {
           id: activeSessionId,
@@ -494,12 +497,12 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
           messages: sanitizedCurrentMsgs,
         };
         const updated = [newSession, ...prev];
-        const clean = deduplicateSessions(updated).slice(0, 15);
-        safeStorageSet(historyKey, clean);
-        return clean;
+        const limited = updated.slice(0, 20);
+        safeStorageSet(historyKey, limited);
+        return limited;
       }
     });
-  }, [messages, storageKey, activeSessionId, historyKey, activeSessionKey, loading]);
+  }, [messages, storageKey, activeSessionId, historyKey, loading]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -868,170 +871,184 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
   };
 
   const renderFormattedContent = (content: string, msgId: string) => {
-    // Split into code blocks and normal text blocks
-    const parts = content.split(/(```[\s\S]*?```)/g);
-
     return (
-      <div className="space-y-2.5 font-sans text-slate-200 select-text cursor-text selection:bg-amber-500/30 selection:text-amber-100 leading-relaxed">
-        {parts.map((part, partIdx) => {
-          if (!part) return null;
-
-          // Code block
-          if (part.startsWith('```') && part.endsWith('```')) {
-            const inner = part.slice(3, -3).trim();
-            const lines = inner.split('\n');
-            let lang = 'code';
-            let codeContent = inner;
-            if (lines.length > 0 && lines[0].trim().match(/^[a-zA-Z0-9_#-]+$/)) {
-              lang = lines[0].trim().toLowerCase();
-              codeContent = lines.slice(1).join('\n');
-            }
-            const sectionKey = `${msgId}_code_${partIdx}`;
-            const isCopied = copiedId === sectionKey;
-
-            const isHtmlWeb =
-              lang === 'html' ||
-              codeContent.toLowerCase().includes('<!doctype html>') ||
-              codeContent.toLowerCase().includes('<html');
-
-            if (isHtmlWeb) {
+      <div className="space-y-2.5 font-sans text-slate-200 select-text cursor-text selection:bg-amber-500/30 selection:text-amber-100 leading-relaxed text-xs sm:text-sm">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            h1({ children }) {
               return (
-                <InteractiveWebsiteBlock
-                  key={sectionKey}
-                  htmlCode={codeContent}
-                  sectionKey={sectionKey}
-                  isTamil={isTamil}
-                  onFullscreen={(html) => setFullscreenHtml(html)}
-                  onOpenSidePreview={(html) => {
-                    setSidePreviewHtml(html);
-                    setIsSidePreviewOpen(true);
-                  }}
-                  onCopy={(code) => handleCopy(code, sectionKey)}
-                  isCopied={isCopied}
-                />
-              );
-            }
-
-            return (
-              <div key={sectionKey} className="group/code relative my-3 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-xl font-mono">
-                <div className="flex items-center justify-between px-3.5 py-1.5 bg-slate-900 border-b border-slate-800/80 text-[11px] text-slate-400">
-                  <span className="font-bold text-amber-400 uppercase tracking-wider font-mono">{lang}</span>
-                  <button
-                    onClick={() => handleCopy(codeContent, sectionKey)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 text-[11px] font-sans font-semibold transition-colors shadow-sm"
-                    title={isTamil ? 'கோடு பிரதியை எடு' : 'Copy Code Block'}
-                  >
-                    {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
-                    <span>{isCopied ? (isTamil ? 'காப்பிட்!' : 'Copied!') : (isTamil ? 'கோடு காப்பி' : 'Copy Code')}</span>
-                  </button>
-                </div>
-                <pre className="p-3.5 overflow-x-auto text-xs text-emerald-300 leading-relaxed whitespace-pre font-mono select-text cursor-text">
-                  <code>{codeContent}</code>
-                </pre>
-              </div>
-            );
-          }
-
-          // Paragraphs with inline image support and rich markdown formatting
-          const parseInlineMarkdown = (text: string): React.ReactNode[] => {
-            const tokens = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g);
-            return tokens.map((token, idx) => {
-              if (token.startsWith('**') && token.endsWith('**') && token.length >= 4) {
-                return <strong key={idx} className="font-bold text-cyan-200">{token.slice(2, -2)}</strong>;
-              }
-              if (token.startsWith('`') && token.endsWith('`') && token.length >= 2) {
-                return <code key={idx} className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-cyan-300 text-[11px]">{token.slice(1, -1)}</code>;
-              }
-              if (token.startsWith('*') && token.endsWith('*') && token.length >= 2 && !token.startsWith('**')) {
-                return <em key={idx} className="italic text-slate-300">{token.slice(1, -1)}</em>;
-              }
-              return token;
-            });
-          };
-
-          const renderStyledLine = (line: string, lineKey: string): React.ReactNode => {
-            const trimmed = line.trim();
-            if (!trimmed) return <div key={lineKey} className="h-1" />;
-
-            if (trimmed.startsWith('####')) {
-              return (
-                <h4 key={lineKey} className="text-xs sm:text-sm font-bold text-cyan-300 mt-2 mb-1 font-mono">
-                  {parseInlineMarkdown(trimmed.replace(/^####\s*/, ''))}
-                </h4>
-              );
-            }
-            if (trimmed.startsWith('###')) {
-              return (
-                <h3 key={lineKey} className="text-sm sm:text-base font-black text-cyan-300 mt-2.5 mb-1 font-mono tracking-tight">
-                  {parseInlineMarkdown(trimmed.replace(/^###\s*/, ''))}
-                </h3>
-              );
-            }
-            if (trimmed.startsWith('##')) {
-              return (
-                <h2 key={lineKey} className="text-base sm:text-lg font-black text-white mt-3 mb-1.5 font-mono tracking-tight border-b border-white/10 pb-1">
-                  {parseInlineMarkdown(trimmed.replace(/^##\s*/, ''))}
-                </h2>
-              );
-            }
-            if (trimmed.startsWith('# ')) {
-              return (
-                <h1 key={lineKey} className="text-lg sm:text-xl font-black text-cyan-200 mt-3.5 mb-2 font-mono">
-                  {parseInlineMarkdown(trimmed.replace(/^#\s*/, ''))}
+                <h1 className="text-base sm:text-lg font-extrabold text-amber-300 mt-3 mb-1.5 border-b border-slate-800 pb-1 flex items-center gap-2">
+                  <span className="w-1.5 h-4 rounded-full bg-amber-400 inline-block shrink-0"></span>
+                  {children}
                 </h1>
               );
-            }
-
-            if (/^[-*•]\s+/.test(trimmed)) {
-              const itemText = trimmed.replace(/^[-*•]\s+/, '');
+            },
+            h2({ children }) {
               return (
-                <div key={lineKey} className="flex items-start gap-2 my-1 pl-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 shrink-0 shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
-                  <span className="text-xs sm:text-sm text-slate-200 leading-relaxed">
-                    {parseInlineMarkdown(itemText)}
-                  </span>
-                </div>
+                <h2 className="text-sm sm:text-base font-bold text-amber-200 mt-2.5 mb-1 flex items-center gap-1.5">
+                  <span className="w-1 h-3.5 rounded-full bg-rose-400 inline-block shrink-0"></span>
+                  {children}
+                </h2>
               );
-            }
+            },
+            h3({ children }) {
+              return (
+                <h3 className="text-xs sm:text-sm font-semibold text-emerald-300 mt-2 mb-1">
+                  {children}
+                </h3>
+              );
+            },
+            p({ children }) {
+              return <p className="leading-relaxed my-1.5 text-slate-200">{children}</p>;
+            },
+            strong({ children }) {
+              return <strong className="font-extrabold text-amber-300">{children}</strong>;
+            },
+            em({ children }) {
+              return <em className="italic text-slate-200">{children}</em>;
+            },
+            ul({ children }) {
+              return <ul className="list-none my-2 space-y-1 pl-1">{children}</ul>;
+            },
+            ol({ children }) {
+              return <ol className="list-decimal my-2 space-y-1 pl-5 text-slate-200">{children}</ol>;
+            },
+            li({ children }) {
+              return (
+                <li className="flex items-start gap-2 my-0.5 leading-relaxed text-slate-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                  <div className="flex-1">{children}</div>
+                </li>
+              );
+            },
+            blockquote({ children }) {
+              return (
+                <blockquote className="border-l-3 border-amber-500 bg-slate-900/80 px-3 py-2 rounded-r-xl my-2 text-slate-300 italic">
+                  {children}
+                </blockquote>
+              );
+            },
+            code({ node, inline, className, children, ...props }: any) {
+              const match = /language-(\w+)/.exec(className || '');
+              const lang = match ? match[1] : '';
+              const codeStr = String(children).replace(/\n$/, '');
 
-            if (/^\d+\.\s+/.test(trimmed)) {
-              const match = trimmed.match(/^(\d+\.)\s+(.*)$/);
-              if (match) {
+              if (!inline && (lang || codeStr.includes('\n') || codeStr.startsWith('<!DOCTYPE') || codeStr.startsWith('<html'))) {
+                const sectionKey = `${msgId}_code_${Math.random()}`;
+                const isCopied = copiedId === sectionKey;
+                const isHtmlWeb =
+                  lang === 'html' ||
+                  codeStr.toLowerCase().includes('<!doctype html>') ||
+                  codeStr.toLowerCase().includes('<html');
+
+                if (isHtmlWeb) {
+                  return (
+                    <InteractiveWebsiteBlock
+                      key={sectionKey}
+                      htmlCode={codeStr}
+                      sectionKey={sectionKey}
+                      isTamil={isTamil}
+                      onFullscreen={(html) => setFullscreenHtml(html)}
+                      onOpenSidePreview={(html) => {
+                        setSidePreviewHtml(html);
+                        setIsSidePreviewOpen(true);
+                      }}
+                      onCopy={(code) => handleCopy(code, sectionKey)}
+                      isCopied={isCopied}
+                    />
+                  );
+                }
+
                 return (
-                  <div key={lineKey} className="flex items-start gap-2 my-1 pl-1">
-                    <span className="font-mono font-bold text-cyan-400 text-xs shrink-0 mt-0.5">{match[1]}</span>
-                    <span className="text-xs sm:text-sm text-slate-200 leading-relaxed">
-                      {parseInlineMarkdown(match[2])}
-                    </span>
+                  <div key={sectionKey} className="group/code relative my-3 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-xl font-mono">
+                    <div className="flex items-center justify-between px-3.5 py-1.5 bg-slate-900 border-b border-slate-800/80 text-[11px] text-slate-400">
+                      <span className="font-bold text-amber-400 uppercase tracking-wider font-mono">{lang || 'CODE'}</span>
+                      <button
+                        onClick={() => handleCopy(codeStr, sectionKey)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 text-[11px] font-sans font-semibold transition-colors shadow-sm"
+                        title={isTamil ? 'கோடு பிரதியை எடு' : 'Copy Code Block'}
+                      >
+                        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
+                        <span>{isCopied ? (isTamil ? 'காப்பிட்!' : 'Copied!') : (isTamil ? 'கோடு காப்பி' : 'Copy Code')}</span>
+                      </button>
+                    </div>
+                    <pre className="p-3.5 overflow-x-auto text-xs text-emerald-300 leading-relaxed whitespace-pre font-mono select-text cursor-text">
+                      <code>{codeStr}</code>
+                    </pre>
                   </div>
                 );
               }
-            }
 
-            return (
-              <div key={lineKey} className="text-xs sm:text-sm text-slate-200 leading-relaxed">
-                {parseInlineMarkdown(line)}
-              </div>
-            );
-          };
-
-          const paragraphs = part.split(/\n\n+/);
-          return (
-            <div key={`part_${partIdx}`} className="space-y-2">
-              {paragraphs.map((para, paraIdx) => {
-                if (!para.trim()) return null;
-                const sectionKey = `${msgId}_para_${partIdx}_${paraIdx}`;
-
-                const lines = para.split('\n');
-                return (
-                  <div key={sectionKey} className="space-y-1 font-sans select-text cursor-text">
-                    {lines.map((line, lIdx) => renderStyledLine(line, `${sectionKey}_line_${lIdx}`))}
+              return (
+                <code className="bg-slate-900 border border-slate-800 text-amber-300 px-1.5 py-0.5 rounded font-mono text-[11px]" {...props}>
+                  {children}
+                </code>
+              );
+            },
+            img({ src, alt }) {
+              if (!src) return null;
+              return (
+                <div className="my-3 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl p-2 max-w-lg group/img">
+                  <div className="relative overflow-hidden rounded-xl">
+                    <img
+                      src={src}
+                      alt={alt || 'Swatea AI Image'}
+                      className="w-full h-auto object-contain max-h-80 bg-slate-900 cursor-pointer hover:scale-102 transition-transform duration-300"
+                      onClick={() => setPreviewModalImage(src)}
+                    />
+                    <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => setPreviewModalImage(src)}
+                        className="p-2 bg-slate-900/90 hover:bg-amber-500 hover:text-slate-950 text-white rounded-xl shadow border border-slate-700 font-bold flex items-center gap-1.5 text-xs transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span>{isTamil ? 'பெரிதாக்கு' : 'Zoom'}</span>
+                      </button>
+                      <a
+                        href={src}
+                        download={`swatea-ai-image-${Date.now()}.png`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-slate-900/90 hover:bg-rose-500 hover:text-white text-white rounded-xl shadow border border-slate-700 font-bold flex items-center gap-1.5 text-xs transition-colors"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>{isTamil ? 'பதிவிறக்கு' : 'Download'}</span>
+                      </a>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                </div>
+              );
+            },
+            table({ children }) {
+              return (
+                <div className="overflow-x-auto my-3 border border-slate-800 rounded-xl bg-slate-950 shadow-md">
+                  <table className="w-full text-left text-xs text-slate-200 border-collapse">{children}</table>
+                </div>
+              );
+            },
+            th({ children }) {
+              return <th className="bg-slate-900 px-3 py-2 border-b border-slate-800 text-amber-300 font-bold">{children}</th>;
+            },
+            td({ children }) {
+              return <td className="px-3 py-2 border-b border-slate-800/60">{children}</td>;
+            },
+            a({ href, children }) {
+              return (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-400 underline hover:text-amber-300 font-semibold"
+                >
+                  {children}
+                </a>
+              );
+            },
+          }}
+        >
+          {content}
+        </ReactMarkdown>
       </div>
     );
   };
@@ -1076,7 +1093,12 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
 
   const clearChat = () => {
     stopSpeaking();
-    startNewChat();
+    setMessages([]);
+    try {
+      localStorage.removeItem(storageKey);
+    } catch (err) {
+      console.error('Error clearing chat:', err);
+    }
   };
 
   const startNewChat = () => {
@@ -1085,29 +1107,20 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
     setActiveSessionId(newSessionId);
     setMessages([defaultWelcomeMessage]);
     safeStorageSet(storageKey, [defaultWelcomeMessage]);
-    try {
-      localStorage.setItem(activeSessionKey, newSessionId);
-    } catch (e) {}
   };
 
   const loadSession = (session: ChatSession) => {
     stopSpeaking();
     setActiveSessionId(session.id);
     setMessages(session.messages);
-    safeStorageSet(storageKey, session.messages);
-    try {
-      localStorage.setItem(activeSessionKey, session.id);
-    } catch (e) {}
-    setShowHistoryDrawer(false);
   };
 
   const deleteSession = (sessionId: string) => {
     stopSpeaking();
     setSavedSessions((prev) => {
       const updated = prev.filter((s) => s.id !== sessionId);
-      const clean = deduplicateSessions(updated);
-      safeStorageSet(historyKey, clean);
-      return clean;
+      safeStorageSet(historyKey, updated);
+      return updated;
     });
 
     if (activeSessionId === sessionId) {
@@ -1120,7 +1133,6 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
     setSavedSessions([]);
     try {
       localStorage.removeItem(historyKey);
-      localStorage.removeItem(activeSessionKey);
     } catch (err) {
       console.error('Error clearing history:', err);
     }
@@ -1156,26 +1168,16 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
   };
 
   return (
-    <div className={`h-full flex flex-col rounded-2xl border overflow-hidden relative transition-colors duration-300 ${
-      isLightMode
-        ? 'bg-white border-slate-200/90 text-slate-900 shadow-xl'
-        : 'glass-panel border-slate-800/80 text-slate-100 shadow-2xl'
-    }`}>
-      {/* Top Header / Model Switcher Bar */}
-      <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3 shrink-0 z-10 backdrop-blur-md transition-colors ${
-        isLightMode
-          ? 'bg-slate-50/90 border-slate-200 text-slate-800'
-          : 'bg-slate-900/80 border-slate-800/80 text-white'
-      }`}>
+    <div className="h-full flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-2xl relative">
+      {/* Top Header / Gemini Model Picker Bar */}
+      <div className="px-4 py-3 bg-slate-900/80 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 shrink-0 z-10 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-white shadow-md ${
-              isLightMode ? 'bg-slate-900' : 'bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600'
-            }`}>
-              <Sparkles className="w-4 h-4 text-amber-200" />
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
+              <Sparkles className="w-4 h-4 text-amber-100" />
             </div>
-            <span className={`font-extrabold text-sm tracking-wide ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-              Swatea AI Studio
+            <span className="font-extrabold text-sm text-white tracking-wide">
+              Swatea AI
             </span>
           </div>
 
@@ -1183,11 +1185,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className={`text-[11px] font-semibold rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer shadow-xs max-w-[260px] sm:max-w-none truncate border ${
-              isLightMode
-                ? 'bg-white border-slate-300 text-slate-800 focus:border-slate-400'
-                : 'bg-slate-950 border-slate-800 text-emerald-300 font-mono focus:border-emerald-500'
-            }`}
+            className="bg-slate-950 border border-slate-800 text-emerald-300 font-mono text-[11px] rounded-lg px-2.5 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-inner max-w-[260px] sm:max-w-none truncate"
           >
             <option value="gemini-3.6-flash">⚡ Gemini 3.6 Flash</option>
             <option value="gemini-3.6-pro">🔬 Gemini 3.6 Pro</option>
@@ -1202,52 +1200,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
           </select>
         </div>
 
-        {/* Header Action Buttons */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
-            className={`px-2.5 py-1.5 rounded-lg border font-bold transition-all flex items-center gap-1.5 text-xs shadow-xs ${
-              showHistoryDrawer
-                ? 'bg-amber-500 text-slate-950 border-amber-400'
-                : isLightMode
-                ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                : 'bg-slate-950 hover:bg-slate-800 text-slate-200 border-slate-800 hover:border-amber-500/50'
-            }`}
-            title={isTamil ? 'சாட் வரலாறு' : 'Chat History Archive'}
-          >
-            <History className="w-3.5 h-3.5 text-amber-500" />
-            <span className="hidden sm:inline">{isTamil ? 'வரலாறு' : 'History'}</span>
-            {savedSessions.length > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-black text-[10px]">
-                {savedSessions.length}
-              </span>
-            )}
-          </button>
 
-          <button
-            onClick={startNewChat}
-            className={`px-2.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 text-xs shadow-xs ${
-              isLightMode
-                ? 'bg-slate-900 hover:bg-slate-800 text-white'
-                : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-            }`}
-            title={isTamil ? 'புதிய உரையாடல்' : 'Start New Chat'}
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[3]" />
-            <span className="hidden sm:inline">{isTamil ? 'புதிய சாட்' : 'New Chat'}</span>
-          </button>
-          <button
-            onClick={clearChat}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isLightMode
-                ? 'text-slate-500 hover:text-rose-600 hover:bg-slate-100'
-                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800'
-            }`}
-            title="Clear Conversation"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
       </div>
 
       {/* Global Speaking Status Banner */}
@@ -1278,64 +1231,20 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
           {/* Main Stream Area (Scrollable Messages Container) */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
             <div className="max-w-3xl mx-auto space-y-6">
-              {/* ChatGPT Style Empty State Greeting */}
+              {/* Welcome Greeting on clean start */}
               {messages.length <= 1 && (
-                <div className="py-12 text-center space-y-6 flex flex-col items-center justify-center min-h-[320px]">
-                  <div className="my-1">
-                    <AiOrb state="idle" size="lg" />
+                <div className="py-12 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600 flex items-center justify-center text-white shadow-xl mx-auto">
+                    <Sparkles className="w-6 h-6 text-amber-100" />
                   </div>
-                  <h1 className={`text-3xl sm:text-4xl font-extrabold tracking-tight ${
-                    isLightMode
-                      ? 'text-slate-900'
-                      : 'text-white bg-gradient-to-r from-white via-cyan-200 to-purple-300 bg-clip-text text-transparent'
-                  }`}>
-                    {isTamil ? 'நீங்கள் தயார் என்றால் தொடங்குங்கள்.' : 'Ready when you are.'}
+                  <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                    {isTamil ? 'வணக்கம்! நான் ஸ்வாதியா ஏஐ' : 'Hello! I am Swatea AI'}
                   </h1>
-
-                  {/* ChatGPT Style Prompt Action Buttons */}
-                  <div className="flex flex-wrap items-center justify-center gap-2 max-w-xl mx-auto pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setInput(isTamil ? 'எனக்கு ஒரு புதிய படம் உருவாக்கித் தா' : 'Create an image of ')}
-                      className={`px-3.5 py-2 rounded-full border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                        isLightMode
-                          ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700 shadow-xs'
-                          : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
-                      }`}
-                    >
-                      <ImageIcon className="w-4 h-4 text-sky-500" />
-                      <span>{isTamil ? 'படம் உருவாக்கு' : 'Create an image'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setInput(isTamil ? 'எனக்கு ஒரு கட்டுரை அல்லது கவிதை எழுது' : 'Write or edit ')}
-                      className={`px-3.5 py-2 rounded-full border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                        isLightMode
-                          ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700 shadow-xs'
-                          : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
-                      }`}
-                    >
-                      <Pencil className="w-4 h-4 text-emerald-500" />
-                      <span>{isTamil ? 'எழுது அல்லது திருத்து' : 'Write or edit'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUseWebSearch(true);
-                        setInput(isTamil ? 'இன்றைய முக்கிய செய்திகள் என்ன?' : 'Search the web for ');
-                      }}
-                      className={`px-3.5 py-2 rounded-full border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                        isLightMode
-                          ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700 shadow-xs'
-                          : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
-                      }`}
-                    >
-                      <Globe className="w-4 h-4 text-amber-500" />
-                      <span>{isTamil ? 'இணையத்தில் தேடு' : 'Search the web'}</span>
-                    </button>
-                  </div>
+                  <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+                    {isTamil
+                      ? 'உங்களுக்குத் தேவையான கேள்விகள், தகவல்கள் அல்லது உதவிகளைக் கேட்கலாம்.'
+                      : 'Ask any question or request help with coding, writing, research, and website building.'}
+                  </p>
                 </div>
               )}
 
@@ -1351,34 +1260,24 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                     <div
                       className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center font-bold text-xs shadow-md ${
                         isUser
-                          ? isLightMode
-                            ? 'bg-slate-800 text-white'
-                            : 'bg-slate-800 text-slate-200 border border-slate-700'
-                          : isLightMode
-                          ? 'bg-emerald-600 text-white'
+                          ? 'bg-slate-800 text-slate-200 border border-slate-700'
                           : 'bg-gradient-to-tr from-amber-500 via-rose-600 to-indigo-600 text-white'
                       }`}
                     >
-                      {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-amber-100" />}
+                      {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-amber-200" />}
                     </div>
 
                     {/* Message Box */}
                     <div
                       className={`group relative rounded-2xl p-4 text-xs sm:text-sm leading-relaxed border ${
                         isUser
-                          ? isLightMode
-                            ? 'bg-slate-100 border-slate-200 text-slate-900 rounded-tr-none'
-                            : 'bg-amber-500/10 border-amber-500/30 text-amber-50 rounded-tr-none'
-                          : isLightMode
-                          ? 'bg-white border-slate-200/90 text-slate-800 rounded-tl-none shadow-sm'
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-50 rounded-tr-none'
                           : 'bg-slate-900/90 border-slate-800/90 text-slate-200 rounded-tl-none shadow-xl'
                       }`}
                     >
                       {/* Message Meta */}
-                      <div className={`flex items-center justify-between gap-4 mb-1.5 text-[10px] border-b pb-1 ${
-                        isLightMode ? 'text-slate-500 border-slate-200' : 'text-slate-400 border-slate-800/60'
-                      }`}>
-                        <span className={`font-bold font-mono ${isLightMode ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <div className="flex items-center justify-between gap-4 mb-1.5 text-[10px] text-slate-400 border-b border-slate-800/60 pb-1">
+                        <span className="font-bold text-slate-300 font-mono">
                           {isUser ? (isTamil ? 'நீங்கள்' : 'You') : 'Swatea AI'}
                         </span>
                         <span>{msg.timestamp}</span>
@@ -1386,7 +1285,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
 
                       {/* User Uploaded Image Preview */}
                       {msg.userImage && (
-                        <div className="mt-2 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 max-w-xs shadow-md">
+                        <div className="mt-2 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 max-w-xs shadow-md">
                           <img
                             src={msg.userImage}
                             alt="Uploaded preview"
@@ -1557,39 +1456,27 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
             </div>
           </div>
 
-          {/* STICKY BOTTOM TYPING DASHBOARD */}
-          <div className={`shrink-0 sticky bottom-0 left-0 right-0 p-3 sm:p-4 border-t backdrop-blur-xl z-20 transition-colors ${
-            isLightMode
-              ? 'bg-white/90 border-slate-200'
-              : 'bg-slate-950/80 border-slate-800/80'
-          }`}>
+          {/* FIXED / STICKY GEMINI-STYLE BOTTOM TYPING DASHBOARD */}
+          <div className="shrink-0 sticky bottom-0 left-0 right-0 p-3 sm:p-4 bg-slate-950/80 border-t border-slate-800/80 backdrop-blur-xl z-20">
             <div className="max-w-3xl mx-auto space-y-2">
               {/* Attached File Preview Badge */}
               {attachedFile && (
-                <div className={`flex items-center justify-between px-3 py-1.5 rounded-xl text-xs font-mono shadow-xs border ${
-                  isLightMode
-                    ? 'bg-amber-50 border-amber-200 text-amber-800'
-                    : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                }`}>
+                <div className="flex items-center justify-between bg-amber-500/15 border border-amber-500/40 text-amber-300 px-3 py-1.5 rounded-xl text-xs font-mono shadow-sm">
                   <span className="truncate max-w-[300px]">📎 {attachedFile.name}</span>
                   <button
                     type="button"
                     onClick={() => setAttachedFile(null)}
-                    className="text-slate-400 hover:text-rose-600 p-0.5 rounded-lg transition-colors"
+                    className="text-slate-400 hover:text-rose-400 p-0.5 rounded-lg transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
 
-              {/* ChatGPT Style Capsule Form */}
+              {/* Gemini Capsule Form */}
               <form
                 onSubmit={handleSend}
-                className={`rounded-2xl sm:rounded-3xl p-2.5 sm:p-3.5 border transition-all ${
-                  isLightMode
-                    ? 'bg-white border-slate-300 shadow-lg shadow-slate-200/60 focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-100'
-                    : 'glass-card bg-slate-900/80 border-slate-800 focus-within:border-amber-500/80 shadow-2xl focus-within:shadow-amber-500/10'
-                }`}
+                className="glass-card bg-slate-900/80 border border-slate-800 focus-within:border-amber-500/80 rounded-2xl sm:rounded-3xl p-2 sm:p-3 shadow-2xl transition-all focus-within:shadow-amber-500/10"
               >
                 <input
                   type="file"
@@ -1612,43 +1499,29 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                   rows={1}
                   placeholder={
                     isTamil
-                      ? 'எதையும் கேளுங்கள் (उदा. "ஒரு REST API உருவாக்கு")...'
-                      : 'Ask anything...'
+                      ? 'ஸ்வாதியா ஜெமினியிடம் ஏதேனும் கேளுங்கள் (उदा. "ஒரு REST API உருவாக்கு")...'
+                      : 'Ask Swatea Gemini anything (e.g. "Draft an enterprise REST API")...'
                   }
-                  className={`w-full bg-transparent text-xs sm:text-sm focus:outline-none px-3 py-1.5 resize-none max-h-32 min-h-[40px] ${
-                    isLightMode
-                      ? 'text-slate-900 placeholder-slate-400'
-                      : 'text-slate-100 placeholder-slate-500'
-                  }`}
+                  className="w-full bg-transparent text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none px-3 py-1.5 resize-none max-h-32 min-h-[40px]"
                 />
 
                 {/* Bottom Controls Bar inside Capsule */}
-                <div className={`flex items-center justify-between pt-2 border-t mt-1 px-1 ${
-                  isLightMode ? 'border-slate-200' : 'border-slate-800/60'
-                }`}>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 mt-1 px-1">
                   {/* Left Action Buttons */}
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className={`p-2 rounded-xl transition-all flex items-center justify-center text-xs ${
-                        isLightMode
-                          ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-                          : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
-                      }`}
+                      className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs"
                       title="Attach File"
                     >
-                      <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <Paperclip className="w-4 h-4" />
                     </button>
 
                     <button
                       type="button"
                       onClick={magicEnhancePrompt}
-                      className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-mono ${
-                        isLightMode
-                          ? 'text-purple-600 hover:bg-purple-50'
-                          : 'text-amber-400 hover:text-amber-300 hover:bg-slate-800'
-                      }`}
+                      className="p-2 text-amber-400 hover:text-amber-300 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs font-mono"
                       title={isTamil ? 'வினவலை மேம்படுத்து' : 'Magic Prompt Enhancer'}
                     >
                       <Sparkles className="w-4 h-4" />
@@ -1663,14 +1536,10 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                           : 'Create a modern, responsive landing page website with hero section, features grid, pricing table, and contact form';
                         setInput(defaultPrompt);
                       }}
-                      className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-mono ${
-                        isLightMode
-                          ? 'text-emerald-600 hover:bg-emerald-50'
-                          : 'text-emerald-400 hover:text-emerald-300 hover:bg-slate-800'
-                      }`}
+                      className="p-2 text-emerald-400 hover:text-emerald-300 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs font-mono"
                       title={isTamil ? 'இணையதளம் உருவாக்கு' : 'Build Instant Website'}
                     >
-                      <Globe className="w-4 h-4" />
+                      <Globe className="w-4 h-4 text-emerald-400" />
                       <span className="hidden sm:inline text-[11px] font-bold">Build Web</span>
                     </button>
 
@@ -1679,9 +1548,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                       onClick={toggleVoiceListening}
                       className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs ${
                         isListening
-                          ? 'bg-rose-500/20 text-rose-500 border border-rose-500/50 animate-pulse'
-                          : isLightMode
-                          ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse'
                           : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
                       }`}
                       title={isTamil ? 'குரல் உள்ளீடு' : 'Voice Dictation'}
@@ -1695,20 +1562,16 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                   <button
                     type="submit"
                     disabled={!input.trim() || loading}
-                    className={`px-4 py-2 font-extrabold rounded-xl transition-all shadow-md flex items-center gap-2 text-xs ${
-                      isLightMode
-                        ? 'bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400'
-                        : 'bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 text-slate-950 hover:brightness-110 disabled:opacity-40'
-                    }`}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 text-slate-950 font-extrabold rounded-xl hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg flex items-center gap-2 text-xs"
                   >
                     <span>{isTamil ? 'அனுப்பு' : 'Send'}</span>
-                    <Send className={`w-3.5 h-3.5 ${isLightMode ? 'text-white' : 'text-slate-950'}`} />
+                    <Send className="w-3.5 h-3.5 text-slate-950" />
                   </button>
                 </div>
               </form>
 
               {/* Gemini Disclaimer */}
-              <div className={`text-center text-[10px] font-mono ${isLightMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              <div className="text-center text-[10px] text-slate-500 font-mono">
                 {isTamil
                   ? 'ஸ்வாதியா ஏஐ தவறான தகவல்களைத் தரக்கூடும். முக்கியமான விபரங்களைச் சரிபார்க்கவும்.'
                   : 'Swatea AI may display inaccurate info. Double-check responses.'}
@@ -1729,7 +1592,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
                   {isTamil ? '🌐 நேரலை இணையதளம் (Edge Studio)' : '🌐 Edge Live Web Studio'}
                 </span>
                 <span className="hidden sm:inline text-[10px] font-mono text-emerald-400 bg-emerald-950 border border-emerald-800 px-1.5 py-0.5 rounded">
-                  Port 3000
+                  LIVE STUDIO
                 </span>
               </div>
 
@@ -1884,162 +1747,6 @@ export const ChatModule: React.FC<ChatModuleProps> = ({
           </div>
         )}
       </div>
-
-      {/* Slide-over Chat History Sidebar / Overlay Drawer */}
-      {showHistoryDrawer && (
-        <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-30 flex justify-end transition-all animate-fadeIn">
-          <div
-            className="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl z-40"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Drawer Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-                  <History className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-white">
-                    {isTamil ? 'சாட் வரலாறு (Chat History)' : 'Saved Chat History'}
-                  </h3>
-                  <p className="text-[10px] text-slate-400">
-                    {isTamil ? `${savedSessions.length} உரையாடல்கள் சேமிக்கப்பட்டுள்ளன` : `${savedSessions.length} total saved conversations`}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={startNewChat}
-                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1 shadow"
-                  title={isTamil ? 'புதிய உரையாடல் தொடங்குக' : 'New Chat'}
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>{isTamil ? 'புதிய சாட்' : 'New Chat'}</span>
-                </button>
-                <button
-                  onClick={() => setShowHistoryDrawer(false)}
-                  className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* History Search Bar */}
-            <div className="p-3 border-b border-slate-800/80 bg-slate-950/40">
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={historySearchQuery}
-                  onChange={(e) => setHistorySearchQuery(e.target.value)}
-                  placeholder={isTamil ? 'வரலாற்றில் தேடுக...' : 'Search chat history...'}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-            </div>
-
-            {/* Session List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {savedSessions.length === 0 ? (
-                <div className="text-center py-12 px-4 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center mx-auto text-slate-500">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <p className="text-xs text-slate-400 font-medium">
-                    {isTamil
-                      ? 'இன்னும் பழைய உரையாடல்கள் எதுவுமில்லை. புதிய சாட் தொடங்கி பேசவும்!'
-                      : 'No saved chat history yet. Start asking questions to save!'}
-                  </p>
-                </div>
-              ) : (
-                savedSessions
-                  .filter((s) =>
-                    s.title.toLowerCase().includes(historySearchQuery.toLowerCase()) ||
-                    s.messages.some((m) => m.content.toLowerCase().includes(historySearchQuery.toLowerCase()))
-                  )
-                  .map((session) => {
-                    const isActive = session.id === activeSessionId;
-                    const msgCount = session.messages.filter((m) => m.role === 'user').length;
-
-                    return (
-                      <div
-                        key={session.id}
-                        onClick={() => loadSession(session)}
-                        className={`group relative p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                          isActive
-                            ? 'bg-amber-500/10 border-amber-500/60 shadow-lg shadow-amber-950/30'
-                            : 'bg-slate-950/80 hover:bg-slate-800/80 border-slate-800/80 hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center gap-2">
-                            {isActive && (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider">
-                                {isTamil ? 'தற்போது' : 'Active'}
-                              </span>
-                            )}
-                            <h4 className="text-xs font-bold text-slate-200 truncate group-hover:text-amber-300">
-                              {session.title || (isTamil ? 'தலைப்பற்ற சாட்' : 'Untitled Chat')}
-                            </h4>
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-slate-500" />
-                              {session.updatedAt || session.createdAt}
-                            </span>
-                            <span>•</span>
-                            <span>{msgCount} {isTamil ? 'கேள்விகள்' : 'prompts'}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteSession(session.id);
-                            }}
-                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-rose-400 hover:bg-slate-800"
-                            title={isTamil ? 'இந்த சாட்டை நீக்குக' : 'Delete Session'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400 transition-transform group-hover:translate-x-0.5" />
-                        </div>
-                      </div>
-                    );
-                  })
-              )}
-            </div>
-
-            {/* Drawer Footer / Clear All */}
-            {savedSessions.length > 0 && (
-              <div className="p-3 border-t border-slate-800 bg-slate-950/90 flex items-center justify-between text-xs">
-                <span className="text-[11px] text-slate-500">
-                  {isTamil ? 'வரலாறு கணினியில் உள்ளூர் சேமிப்பில் உள்ளது' : 'History is saved in local browser storage'}
-                </span>
-                <button
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        isTamil
-                          ? 'நிச்சயமாக அனைத்து சாட் வரலாற்றையும் நீக்க வேண்டுமா?'
-                          : 'Are you sure you want to clear all saved chat history?'
-                      )
-                    ) {
-                      clearAllHistory();
-                    }
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-900/40 font-semibold text-[11px] transition-colors"
-                >
-                  {isTamil ? 'அனைத்தையும் நீக்கு' : 'Clear All History'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Fullscreen Image Preview Modal */}
       {previewModalImage && (

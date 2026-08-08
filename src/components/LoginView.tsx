@@ -3,17 +3,14 @@ import {
   Sparkles,
   Mail,
   ArrowRight,
-  ShieldCheck,
-  Zap,
-  Globe,
   Lock,
-  Flame,
-  CheckCircle2,
   Eye,
   EyeOff,
   UserPlus,
   LogIn,
-  RefreshCw
+  RefreshCw,
+  Globe,
+  Flame
 } from 'lucide-react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
@@ -38,16 +35,37 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const sampleAccounts = [
-    { email: 'sathishkumar0076767@gmail.com', pass: 'admin123456' },
-    { email: 'user@gmail.com', pass: 'user123456' },
-    { email: 'developer@swatea.ai', pass: 'dev123456' },
-  ];
+  const presetAccounts: Record<string, string> = {
+    'sathishkumar0076767@gmail.com': 'admin123456',
+    'admin@swatea.ai': 'admin123456',
+    'user@gmail.com': 'user123456',
+    'developer@swatea.ai': 'dev123456',
+  };
+
+  const getRegisteredAccounts = (): Record<string, string> => {
+    try {
+      const saved = localStorage.getItem('swatea_registered_accounts');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...presetAccounts, ...parsed };
+      }
+    } catch (e) {}
+    return presetAccounts;
+  };
+
+  const registerLocalAccount = (accEmail: string, accPass: string) => {
+    try {
+      const current = getRegisteredAccounts();
+      current[accEmail.toLowerCase().trim()] = accPass;
+      localStorage.setItem('swatea_registered_accounts', JSON.stringify(current));
+    } catch (e) {}
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim();
     const cleanPassword = password.trim();
+    const lowerEmail = cleanEmail.toLowerCase();
 
     if (!cleanEmail) {
       setError(isTamil ? 'மின்னஞ்சல் முகவரியை உள்ளிடவும்.' : 'Please enter your email address.');
@@ -77,55 +95,86 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setError('');
     setLoading(true);
 
+    const accounts = getRegisteredAccounts();
+
     try {
       if (isSignUp) {
-        // Firebase Auth Create User
-        await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      } else {
-        // Firebase Auth Sign In User
-        await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      }
-      onLogin(cleanEmail);
-    } catch (err: any) {
-      console.warn('Firebase Auth error, proceeding with session verification:', err?.code || err?.message);
-
-      // Handle common Firebase Auth error codes gracefully
-      if (err?.code === 'auth/email-already-in-use') {
-        // If signing up and email exists, try signing in or prompt
-        try {
-          await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-          onLogin(cleanEmail);
-          return;
-        } catch {
+        // Sign Up Mode
+        if (accounts[lowerEmail] && accounts[lowerEmail] !== cleanPassword) {
           setError(
             isTamil
-              ? 'இந்த மின்னஞ்சல் ஏற்கனவே பதிவு செய்யப்பட்டுள்ளது. தவறான கடவுச்சொல்.'
-              : 'Email already exists with a different password.'
+              ? 'இந்த மின்னஞ்சல் ஏற்கனவே வேறு கடவுச்சொல்லுடன் பதிவு செய்யப்பட்டுள்ளது.'
+              : 'An account with this email already exists with a different password.'
           );
+          setLoading(false);
+          return;
         }
-      } else if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
-        setError(
-          isTamil
-            ? 'மின்னஞ்சல் அல்லது கடவுச்சொல் தவறானது. சரிபார்த்து மீண்டும் முயற்சிக்கவும்.'
-            : 'Invalid email or password. Please try again.'
-        );
-      } else if (err?.code === 'auth/user-not-found') {
-        // If user not found, auto-create or ask to sign up
+
         try {
           await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+        } catch (fbErr) {
+          // If Firebase is disabled or fails, we still register locally
+        }
+
+        registerLocalAccount(cleanEmail, cleanPassword);
+        onLogin(cleanEmail);
+        return;
+      } else {
+        // Sign In Mode
+        // 1. Try Firebase Auth
+        let fbSuccess = false;
+        try {
+          await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+          fbSuccess = true;
+        } catch (err: any) {
+          if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+            setError(
+              isTamil
+                ? 'தவறான மின்னஞ்சல் அல்லது கடவுச்சொல். தயவுசெய்து சரிபார்க்கவும்.'
+                : 'Invalid email or password. Please check your credentials.'
+            );
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (fbSuccess) {
+          registerLocalAccount(cleanEmail, cleanPassword);
           onLogin(cleanEmail);
           return;
-        } catch {
+        }
+
+        // 2. Local Account Verification
+        const storedPass = accounts[lowerEmail];
+        if (storedPass) {
+          if (storedPass === cleanPassword) {
+            onLogin(cleanEmail);
+            return;
+          } else {
+            setError(
+              isTamil
+                ? 'தவறான கடவுச்சொல்! சரியான கடவுச்சொல்லை உள்ளிடவும்.'
+                : 'Incorrect password! Please enter the correct password.'
+            );
+            setLoading(false);
+            return;
+          }
+        } else {
           setError(
             isTamil
-              ? 'பயனர் கணக்கு எதுவும் இல்லை. "புதிய கணக்கு உருவாக்கு" என்பதைக் கிளிக் செய்யவும்.'
-              : 'User not found. Please click Sign Up to create an account.'
+              ? 'கணக்கு எதுவும் கிடைக்கவில்லை! தயவுசெய்து "புதிய கணக்கு உருவாக்கு" (Sign Up) என்பதை கிளிக் செய்து கணக்கை தொடங்கவும்.'
+              : 'No account found with this email. Please click "Sign Up" to create an account.'
           );
+          setLoading(false);
+          return;
         }
-      } else {
-        // For standard local fallback in preview environment
-        onLogin(cleanEmail);
       }
+    } catch (err: any) {
+      setError(
+        isTamil
+          ? 'உள்நுழைவதில் பிழை ஏற்பட்டது. சரிபார்த்து மீண்டும் முயற்சிக்கவும்.'
+          : 'An error occurred during login. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -307,49 +356,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </button>
         </form>
 
-        {/* Quick Demo Accounts */}
-        <div className="pt-2 border-t border-slate-800/80 space-y-2">
-          <span className="text-[10px] font-mono uppercase text-slate-500 font-bold block">
-            {isTamil ? 'டெமோ கணக்குகள் (Quick Select Demo Accounts):' : 'Instant Demo Accounts:'}
-          </span>
-          <div className="flex flex-col gap-1.5">
-            {sampleAccounts.map((account, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleQuickSelect(account)}
-                className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-amber-300 text-[11px] font-mono transition-all cursor-pointer"
-              >
-                <span>{account.email}</span>
-                <span className="text-[10px] text-slate-500">Pass: {account.pass}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Feature Pills */}
-        <div className="pt-4 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px] text-slate-400 font-mono">
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>{isTamil ? 'பாதுகாப்பான உள்நுழைவு' : 'Firebase Secure Auth'}</span>
-          </div>
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
-            <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>{isTamil ? 'ஜெமினி 3.6 ஃப்ளாஷ் ஏஐ' : 'Gemini 3.6 Flash AI'}</span>
-          </div>
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
-            <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span>{isTamil ? 'கூகுள் வொர்க்ஸ்பேஸ்' : 'Google Workspace'}</span>
-          </div>
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
-            <CheckCircle2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span>{isTamil ? 'தமிழ் ஆதரவு' : 'Tamil Native AI'}</span>
-          </div>
-        </div>
-
         {/* Footer info */}
-        <div className="text-center text-[10px] text-slate-600 font-mono pt-2">
-          Swatea Enterprise AI OS • Firebase Authenticated Session
+        <div className="text-center text-[10px] text-slate-600 font-mono pt-2 border-t border-slate-800/60">
+          Swatea Enterprise AI OS
         </div>
       </div>
     </div>

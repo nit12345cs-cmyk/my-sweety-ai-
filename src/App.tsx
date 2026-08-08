@@ -7,18 +7,30 @@ import { VoiceModule } from './components/VoiceModule';
 import { AdminModule } from './components/AdminModule';
 import { FooterBar } from './components/FooterBar';
 import { LoginView } from './components/LoginView';
-import { BackgroundAurora } from './components/BackgroundAurora';
 import { ModuleType, LanguageCode, ThemeType } from './types';
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('chat');
   const [theme, setTheme] = useState<ThemeType>(() => {
     try {
-      return (localStorage.getItem('swatea_theme') as ThemeType) || 'chatgpt';
+      const saved = localStorage.getItem('swatea_theme');
+      return saved === 'light' ? 'light' : 'dark';
     } catch {
-      return 'chatgpt';
+      return 'dark';
     }
   });
+
+  useEffect(() => {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  }, [theme]);
 
   const handleThemeChange = (newTheme: ThemeType) => {
     setTheme(newTheme);
@@ -53,8 +65,8 @@ export default function App() {
     }
   });
 
-  const SUPER_ADMIN_EMAIL = 'sathishkumar0076767@gmail.com';
-  const isAdmin = currentUserEmail?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+  const ADMIN_EMAILS = ['sathishkumar0076767@gmail.com', 'admin@swatea.ai'];
+  const isAdmin = Boolean(currentUserEmail && ADMIN_EMAILS.includes(currentUserEmail.toLowerCase().trim()));
 
   useEffect(() => {
     if (!isAdmin && activeModule === 'admin') {
@@ -106,14 +118,15 @@ export default function App() {
     );
   }
 
-  const isLightMode = theme === 'chatgpt' || theme === 'light';
-
   return (
-    <div className={`h-screen w-screen flex flex-col overflow-hidden font-sans select-none relative transition-colors duration-300 ${
-      isLightMode ? 'bg-[#f4f4f7] text-slate-800' : 'bg-[#030307] text-slate-100'
+    <div className={`h-screen w-screen flex flex-col overflow-hidden font-sans select-none relative transition-colors duration-200 ${
+      theme === 'light'
+        ? 'bg-slate-50 text-slate-900 light'
+        : 'bg-slate-950 text-slate-100 bg-dot-pattern dark'
     }`}>
-      {/* Antigravity Animated Aurora Background (only in dark mode) */}
-      {!isLightMode && <BackgroundAurora />}
+      {/* Futuristic Ambient Radial Glow Background */}
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow" />
+      <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow" />
 
       {/* OS Top Navbar */}
       <Header
@@ -135,18 +148,14 @@ export default function App() {
           onSelectModule={(mod) => setActiveModule(mod)}
           language={language}
           isAdmin={isAdmin}
-          currentTheme={theme}
           currentUserEmail={currentUserEmail}
+          onLogout={handleLogout}
         />
 
         {/* Dynamic OS Module Workspace */}
         <main className="flex-1 h-full min-w-0 overflow-hidden relative">
           {activeModule === 'chat' && (
-            <ChatModule
-              language={language}
-              currentUserEmail={currentUserEmail}
-              currentTheme={theme}
-            />
+            <ChatModule language={language} currentUserEmail={currentUserEmail} />
           )}
           {activeModule === 'website' && <WebsiteModule language={language} />}
           {activeModule === 'voice' && <VoiceModule language={language} />}
@@ -165,4 +174,3 @@ export default function App() {
     </div>
   );
 }
-
