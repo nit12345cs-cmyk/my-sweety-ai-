@@ -175,21 +175,20 @@ function isQuotaError(err: any): boolean {
 async function generateWithFallback(ai: GoogleGenAI, primaryModel: string, contents: any, config: any) {
   // Official public Gemini model list supported on generativelanguage.googleapis.com
   const officialModels = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.0-flash-lite'
+    'gemini-3.6-flash',
+    'gemini-3.1-pro-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest'
   ];
 
   let mappedPrimary = primaryModel;
   if (!officialModels.includes(primaryModel)) {
     if (primaryModel.includes('pro') || primaryModel.includes('opus')) {
-      mappedPrimary = 'gemini-1.5-pro';
+      mappedPrimary = 'gemini-3.1-pro-preview';
     } else if (primaryModel.includes('lite') || primaryModel.includes('haiku') || primaryModel.includes('mini')) {
-      mappedPrimary = 'gemini-2.0-flash-lite';
+      mappedPrimary = 'gemini-3.1-flash-lite';
     } else {
-      mappedPrimary = 'gemini-2.5-flash';
+      mappedPrimary = 'gemini-3.6-flash';
     }
   }
 
@@ -343,7 +342,47 @@ function generateSmartFallbackReply(message: string, persona: string, isTaInput:
   const dateStr = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
-  // 1. Help & Assistance Query (e.g. "enaku oru help", "help venum", "udhavi")
+  const cleanQ = queryLower.replace(/[!.,?]/g, '').trim();
+
+  // 1. Greetings & Small Talk FIRST (prevents typos or short words like "aii" or "hi" from triggering coding templates)
+  const isGreeting =
+    cleanQ === 'hi' ||
+    cleanQ === 'hello' ||
+    cleanQ === 'hey' ||
+    cleanQ === 'hii' ||
+    cleanQ === 'helo' ||
+    cleanQ === 'yo' ||
+    cleanQ === 'aii' ||
+    cleanQ === 'ai' ||
+    cleanQ.includes('vanakkam') ||
+    cleanQ.includes('வணக்கம்') ||
+    cleanQ.includes('epdi irukeenga') ||
+    cleanQ.includes('how are you') ||
+    cleanQ.includes('sollu') ||
+    cleanQ.length <= 3;
+
+  if (isGreeting) {
+    return isTa
+      ? `வணக்கம்! நான் ஸ்வாதியா ஏஐ (Swatea AI). உங்களுக்கு இன்று நான் எப்படி உதவ வேண்டும்? உங்களின் சந்தேகங்கள் அல்லது கேள்விகளைத் தயங்காமல் கேட்கலாம்!`
+      : `Vanakkam! Hello! I am Swatea AI. How can I assist you today? Feel free to ask any question or share what you need help with!`;
+  }
+
+  // 2. Creator Identification
+  if (
+    queryLower.includes('creator') ||
+    queryLower.includes('who created') ||
+    queryLower.includes('who built') ||
+    queryLower.includes('உருவாக்கிய') ||
+    queryLower.includes('உருவாக்கினா') ||
+    queryLower.includes('யார் உருவாக்கியது') ||
+    queryLower.includes('கிரியேட்டர்')
+  ) {
+    return isTa
+      ? `ஸ்வாதியா ஏஐ (Swatea AI) பயன்பாடு **சதீஷ் மற்றும் சுவாதி (Sathish & Swathi)** ஆகியோரால் உருவாக்கப்பட்டது! 🚀`
+      : `Swatea AI was created and developed by **Sathish & Swathi**! 🚀`;
+  }
+
+  // 3. Help & Assistance Query
   if (
     queryLower.includes('help') ||
     queryLower.includes('udhavi') ||
@@ -354,16 +393,14 @@ function generateSmartFallbackReply(message: string, persona: string, isTaInput:
     queryLower.includes('guide')
   ) {
     return isTa
-      ? `வணக்கம்! 👋 நிச்சயம், உங்களுக்கு என்ன உதவி வேண்டும்? 
+      ? `வணக்கம்! 👋 நிச்சயம், உங்களுக்கு என்ன உதவி வேண்டும்?
 
-நான் **ஸ்வாதியா ஏஐ (Swatea AI)**. உங்களுக்குக் பின்வரும் அனைத்து விஷயங்களிலும் 100% துல்லியமாக உதவ முடியும்:
+நான் **ஸ்வாதியா ஏஐ (Swatea AI)**. உங்களுக்குப் பின்வரும் அனைத்து விஷயங்களிலும் உதவ முடியும்:
 
-1. 💬 **கேள்வி & பதில்கள் (Q&A & Chat):** எந்தப் பாடம், கல்லூரி, பொது அறிவு அல்லது தொழில்நுட்ப சந்தேகத்திற்கும் உடனடித் தெளிவான விளக்கம்.
-2. 💻 **கோடிங் & புரோகிராமிங் (Coding & Debugging):** React, Python, Node.js, TypeScript, SQL, HTML/CSS புரோகிராம்களை எழுதுதல் மற்றும் பிழைகளை (Errors) சரிசெய்தல்.
-3. 🌐 **நேரலை கூகுள் தேடல் (Live Web Search Grounding):** சமீபத்திய செய்திகள், தங்கம் விலை, வானிலை மற்றும் இணையத் தகவல்களை ஆதாரங்களுடன் பெறுதல்.
-4. 📄 **ஆவணப் பகுப்பாய்வு (Document Intelligence):** PDF, கட்டுரைகள் மற்றும் ஆவணங்களைச் சுருக்கி ஆய்வு செய்தல்.
-5. 🎤 **குரல் வழி உரையாடல் (Text-to-Speech):** பதில்களை தமிழில் அல்லது ஆங்கிலத்தில் குரலாகக் கேட்டல்.
-6. 🎨 **AI படங்கள் உருவாக்குதல் (Image Generation):** நீங்கள் கேட்கும் படங்களை உடனடியாக வரைந்து தருதல்.
+1. 💬 **கேள்வி & பதில்கள் (Q&A & Chat):** எந்தப் பாடம், கல்லூரி, பொது அறிவு அல்லது தொழில்நுட்ப சந்தேகத்திற்கும் தெளிவான விளக்கம்.
+2. 💻 **கோடிங் & புரோகிராமிங்:** React, Python, Node.js, TypeScript, SQL, HTML/CSS புரோகிராம்களை எழுதுதல் மற்றும் பிழைகளைச் சரிசெய்தல்.
+3. 🌐 **நேரலை கூகுள் தேடல்:** சமீபத்திய செய்திகள், தங்கம் விலை, வானிலை மற்றும் இணையத் தகவல்களைப் பெறுதல்.
+4. 📄 **ஆவணப் பகுப்பாய்வு:** PDF, கட்டுரைகள் மற்றும் ஆவணங்களைச் சுருக்கி ஆய்வு செய்தல்.
 
 உங்களுக்கு என்ன உதவி வேண்டும் என்று தயங்காமல் கீழே டைப் செய்யுங்கள்!`
       : `Hello! 👋 How can I help you today?
@@ -372,15 +409,13 @@ I am **Swatea AI**, fully equipped to assist you with:
 
 1. 💬 **Conversational Q&A & Advice:** Direct, clear answers to your specific questions.
 2. 💻 **Full-Stack Coding & Debugging:** Expert code writing in React, Python, Node.js, TypeScript, SQL, and algorithm troubleshooting.
-3. 🌐 **Live Web & Google Search Grounding:** Verified real-time information and research.
-4. 📄 **Document Intelligence & Summarization:** Fast, precise summaries of documents and reports.
-5. 🎤 **Voice Assistant & Speech:** Natural audio playback for responses.
-6. 🎨 **AI Image Generation:** Instant creation of stunning visuals from text prompts.
+3. 🌐 **Live Web & Google Search:** Verified real-time information and research.
+4. 📄 **Document Summarization:** Fast, precise summaries of documents and reports.
 
 Please type your exact question or topic below, and I will be happy to provide a complete answer!`;
   }
 
-  // 2. Features / Capabilities Query
+  // 4. Features / Capabilities Query
   if (
     queryLower.includes('futer') ||
     queryLower.includes('feature') ||
@@ -396,62 +431,25 @@ Please type your exact question or topic below, and I will be happy to provide a
     return isTa
       ? `✨ **ஸ்வாதியா ஏஐ (Swatea AI) - முக்கியமான அம்சங்கள் (Key Features):**
 
-1. 💬 **Multilingual Conversational AI Chat:**
-   - Tanglish (தமிழ் ஆங்கில எழுத்துக்களில்), தூய தமிழ் மற்றும் ஆங்கிலத்தில் சுலபமாக உரையாடலாம்.
-   - எந்த சந்தேகத்திற்கும் தெளிவான மற்றும் துல்லியமான பதில்கள்.
+1. 💬 **Multilingual Conversational AI Chat:** Tanglish, தமிழ் மற்றும் ஆங்கிலத்தில் சுலபமாக உரையாடலாம்.
+2. 💻 **Full-Stack Coding & Debugging:** React, TypeScript, Python, Node.js, SQL போன்றவற்றில் கோடிங் மற்றும் பிழை திருத்தம்.
+3. 🌐 **Live Web Search & News:** நேரலை தகவல்கள் மற்றும் கூகுள் தேடல் பதில்கள்.
+4. 📄 **Document Summarization:** PDF மற்றும் ஆவணங்களைச் சுருக்கித் தரும் வசதி.
+5. 🎤 **Voice Assistant:** குரல் வழி உரையாடல்.
 
-2. 💻 **Full-Stack Coding & Debugging Assistant:**
-   - React, TypeScript, Python, Node.js, SQL, HTML/CSS போன்ற பல மொழிகளில் பிராஜெக்ட் கோடிங், Debugging & Refactoring.
-
-3. 🌐 **Live Web Search & News:**
-   - நேரலை தகவல்கள், சமீபத்திய செய்திகள் மற்றும் கூகுள் தேடல் இணைப்புடன் உடனடி தரவுகள்.
-
-4. 📄 **Document Intelligence & Summarization:**
-   - PDF, கட்டுரைகள் மற்றும் ஆவணங்களை பதிவேற்றி சுருக்கம் மற்றும் பகுப்பாய்வு பெறும் வசதி.
-
-5. 🎤 **Voice & Audio Assistant (Text-to-Speech):**
-   - பதில்களை இயற்கை குரலில் (Tamil & English) கேட்டு அனுபவிக்கும் வசதி.
-
-6. 👁️ **Vision AI & Image Analyzer:**
-   - புகைப்படங்களை பதிவேற்றி அதில் உள்ள தகவல்களை பகுப்பாய்வு செய்யும் திறன்.
-
-7. 🎨 **AI Image Generation:**
-   - கற்பனையான காட்சிகளை பிராம்ப்ட் கொடுத்து உயர்தர படங்களாக உருவாக்கும் வசதி.
-
-8. 🌐 **AI Website Builder:**
-   - ஒரே கிளிக்கில் Tailwind CSS உடன் Responsive வெப்சைட் உருவாக்கும் திறன்.
-
-உங்களுக்கு இதில் எந்த அம்சம் பற்றி கூடுதல் விவரம் வேண்டும்?`
+உங்களுக்கு எந்த அம்சம் பற்றி கூடுதல் விவரம் வேண்டும்?`
       : `✨ **Swatea AI - Core Capabilities & Features:**
 
-1. 💬 **Multilingual AI Chat (Tanglish, Tamil, English):**
-   - Natural conversational responses tailored to your language preferences.
+1. 💬 **Multilingual AI Chat:** Natural conversational responses in Tanglish, Tamil, and English.
+2. 💻 **Full-Stack Coding & Debugging:** End-to-end coding in React, TypeScript, Python, Node.js, SQL, and algorithms.
+3. 🌐 **Real-Time Web Search:** Live web findings and updated data verification.
+4. 📄 **Document Summarization:** Extract insights and summaries from documents.
+5. 🎤 **Voice Assistant:** Interactive text-to-speech capabilities.
 
-2. 💻 **Full-Stack Coding & Technical Architect:**
-   - End-to-end coding in React, TypeScript, Python, Node.js, SQL, and algorithm debugging.
-
-3. 🌐 **Real-Time Live Web Search:**
-   - Up-to-the-minute web findings, current events, and live data verification.
-
-4. 📄 **Document Intelligence & Analysis:**
-   - Summarize, analyze, and extract insights from documents and long-form text.
-
-5. 🎤 **Voice Assistant & Speech Synthesis:**
-   - Interactive Text-to-Speech playback for conversational responses.
-
-6. 👁️ **Vision AI & Image Analysis:**
-   - Upload and analyze images, OCR text extraction, and scene understanding.
-
-7. 🎨 **AI Image Generation:**
-   - Generate creative high-resolution visual art and graphics from text prompts.
-
-8. 🌐 **Instant AI Website Studio:**
-   - Generate fully responsive HTML/Tailwind CSS websites instantly.
-
-Feel free to ask me to demonstrate any of these capabilities!`;
+Feel free to ask any questions!`;
   }
 
-  // 3. Nehru College Query
+  // 5. Nehru College Query
   if (
     queryLower.includes('nehru college') ||
     queryLower.includes('nehru group') ||
@@ -461,77 +459,35 @@ Feel free to ask me to demonstrate any of these capabilities!`;
     queryLower.includes('நேரு கல்லூரி')
   ) {
     return isTa
-      ? `🎓 **நேரு கல்விக் குழுமம் (Nehru Group of Institutions - NGI) - முழுமையான தகவல்கள்:**
+      ? `🎓 **நேரு கல்விக் குழுமம் (Nehru Group of Institutions - NGI) - விவரங்கள்:**
 
-**1. அறிமுகம் (Overview):**
-நேரு கல்விக் குழுமம் (Nehru Group of Institutions) 1968 ஆம் ஆண்டு நிறுவப்பட்ட ஒரு புகழ்பெற்ற கல்விக் குழுமமாகும். இதன் முதன்மை வளாகங்கள் தமிழ்நாட்டின் கோயம்புத்தூர் மற்றும் கேரளாவின் திருச்சூர்/பாலக்காடு பகுதிகளில் அமைந்துள்ளன.
+**1. அறிமுகம்:**
+நேரு கல்விக் குழுமம் (Nehru Group of Institutions) 1968 ஆம் ஆண்டு நிறுவப்பட்ட ஒரு புகழ்பெற்ற கல்விக் குழுமமாகும். இதன் முதன்மை வளாகங்கள் தமிழ்நாட்டின் கோயம்புத்தூர் மற்றும் கேரளாவில் அமைந்துள்ளன.
 
-**2. கோயம்புத்தூரில் உள்ள முக்கிய கல்லூரிகள்:**
-- **Nehru Arts and Science College (NASC), TM Palayam, Coimbatore:**
-  - NAAC 'A' தரம் பெற்ற தன்னாட்சி (Autonomous) கல்லூரி.
-  - B.Sc (Aeronautical Science, Biotechnology, Computer Science, Visual Communication), BBA, B.Com, BCA, M.Sc, M.Com படிப்புகள்.
-- **Nehru Institute of Engineering and Technology (NIET), Kaliyapuram, Coimbatore:**
-  - AICTE அங்கீகாரம் மற்றும் அண்ணா பல்கலைக்கழக இணைப்புக் கொண்டது.
-  - B.E (Aeronautical Engineering, Mechatronics, Computer Science, ECE, Artificial Intelligence & Data Science), M.E, MBA.
-- **Nehru Institute of Technology (NIT), Coimbatore:**
-  - B.E / B.Tech (Civil, Agriculture Engineering, Computer Science, Biomedical Engineering).
-- **Nehru College of Aeronautics and Applied Sciences (NCAAS), Kuniamuthur:**
-  - B.Sc Aeronautical Science மற்றும் Aircraft Maintenance Engineering (AME - DGCA approved).
+**2. முக்கிய கல்லூரிகள் (Coimbatore):**
+- **Nehru Arts and Science College (NASC):** NAAC 'A' தரம் பெற்ற கல்லூரி (B.Sc, BBA, B.Com, BCA, M.Sc).
+- **Nehru Institute of Engineering and Technology (NIET):** AICTE அங்கீகாரம் பெற்ற கல்லூரி (Aeronautical, CSE, ECE, AI & DS, MBA).
+- **Nehru College of Aeronautics and Applied Sciences (NCAAS):** AME & Aeronautical B.Sc படிப்புகள்.
 
-**3. சிறப்பு அம்சங்கள் & வசதிகள்:**
-- **சொந்த விமானப் பயிற்சி மையம்:** மாணவர்களுக்கான உண்மையான Hawker/Cessna விமானங்கள் கொண்ட ஹேங்கர் (Aeronautical Hangar).
-- **NCPIR (Nehru Corporate Placements and Industry Relations):** TCS, Infosys, Wipro, Indigo Airlines, Quest Global போன்ற முன்னணி நிறுவனங்களில் வேலைவாய்ப்பு.
-- **நவீன விடுதி & போக்குவரத்து வசதிகள்:** கோவை மற்றும் கேரளாவின் பல பகுதிகளில் இருந்து கல்லூரி பேருந்துகள்.
+உங்களுக்கு சேர்க்கை அல்லது குறிப்பிட்ட படிப்பு பற்றி கூடுதல் தகவல் தேவைப்பட்டால் தயங்காமல் கேளுங்கள்!`
+      : `🎓 **Nehru Group of Institutions (Nehru College) - Overview:**
 
-உங்களுக்கு சேர்க்கை (Admissions) அல்லது குறிப்பிட்ட படிப்பு (Courses) பற்றிய கூடுதல் தகவல்கள் தேவைப்பட்டால் தயங்காமல் கேட்கலாம்!`
-      : `🎓 **Nehru Group of Institutions (Nehru College) - Comprehensive Overview:**
+**1. About NGI:**
+Established in 1968, Nehru Group of Institutions is a premier educational group in South India with major campuses in Coimbatore and Kerala.
 
-**1. About Nehru Group of Institutions (NGI):**
-Established in 1968 by Founder Chairman Shri P. K. Das, Nehru Group of Institutions is a premier educational group in South India with major campuses in Coimbatore (Tamil Nadu) and Kerala.
+**2. Key Colleges (Coimbatore):**
+- **Nehru Arts and Science College (NASC):** NAAC 'A' Grade autonomous college offering UG/PG programs.
+- **Nehru Institute of Engineering and Technology (NIET):** AICTE approved (Aeronautical, CSE, ECE, AI & DS, MBA).
+- **Nehru College of Aeronautics and Applied Sciences (NCAAS):** Specialized in Aeronautical Science and Aircraft Maintenance Engineering.
 
-**2. Key Campuses & Colleges in Coimbatore:**
-- **Nehru Arts and Science College (NASC), TM Palayam:**
-  - Autonomous college accredited with NAAC 'A' Grade.
-  - Offers UG/PG programs in Aeronautical Science, Biotechnology, Computer Science, Visual Communication, BBA, B.Com, BCA, and M.Sc.
-- **Nehru Institute of Engineering and Technology (NIET):**
-  - AICTE approved and affiliated with Anna University.
-  - Specializes in Aeronautical Engineering, Mechatronics, CSE, ECE, AI & Data Science, and MBA.
-- **Nehru Institute of Technology (NIT):**
-  - Offers Civil, Agriculture, Biomedical, and Computer Science Engineering.
-- **Nehru College of Aeronautics and Applied Sciences (NCAAS), Kuniamuthur:**
-  - Pioneering institute for Aircraft Maintenance Engineering (AME) and Aeronautical B.Sc programs.
-
-**3. Key Highlights & Campus Facilities:**
-- **Real Aircraft Hangar:** On-campus functional aircraft (Hawker, Cessna, Helicopters) for hands-on aeronautical training.
-- **Placements (NCPIR):** Dedicated placement center connecting students with TCS, Infosys, Indigo Airlines, Tech Mahindra, and Quest Global.
-- **Hostels & Transport:** Excellent hostel facilities for men & women with wide bus transport network across Tamil Nadu and Kerala.
-
-Let me know if you need specific details about admission eligibility, fees, or course offerings!`;
+Let me know if you need specific details about admissions or courses!`;
   }
 
-  // 4. Creator Identification
-  if (
-    queryLower.includes('creator') ||
-    queryLower.includes('who created') ||
-    queryLower.includes('who built') ||
-    queryLower.includes('உருவாக்கிய') ||
-    queryLower.includes('உருவாக்கினா') ||
-    queryLower.includes('யார் உருவாக்கியது') ||
-    queryLower.includes('கிரியேட்டர்')
-  ) {
-    return isTa
-      ? `ஸ்வாதியா ஏஐ (Swatea AI) பயன்பாடு **சதீஷ் மற்றும் சுவாதி (Sathish & Swathi)** ஆகியோரால் உருவாக்கப்பட்டது! 🚀`
-      : `Swatea AI was created and developed by **Sathish & Swathi**! 🚀`;
-  }
-
-  // 5. Gold / Silver / Commodity Price Queries
+  // 6. Gold / Silver / Commodity Price Queries
   if (
     queryLower.includes('gold') ||
     queryLower.includes('thangam') ||
     queryLower.includes('தங்கம்') ||
-    queryLower.includes('விலை') ||
-    queryLower.includes(' rate') ||
-    queryLower.includes('pric') ||
     queryLower.includes('sovereign') ||
     queryLower.includes('poun') ||
     queryLower.includes('22k') ||
@@ -542,37 +498,24 @@ Let me know if you need specific details about admission eligibility, fees, or c
     return isTa
       ? `🪙 **இன்றைய தங்கம் & வெள்ளி விலை நிலவரம் (${dateStr}):**
 
-**1. தங்கம் (Gold Rates in India / Tamil Nadu):**
-- **22K ஆபரணத் தங்கம் (22 Karat):**
-  - **1 கிராம்:** ₹7,280 - ₹7,380 (தோராயமாக)
-  - **1 பவுன் (8 கிராம்):** ₹58,240 - ₹59,040
-- **24K சுத்த தங்கம் (24 Karat Pure Gold):**
-  - **1 கிராம்:** ₹7,940 - ₹8,050
-  - **1 பவுன் (8 கிராம்):** ₹63,520 - ₹64,400
+- **22K ஆபரணத் தங்கம்:** 1 பவுன் (8 கிராம்) தோராயமாக ₹58,240 - ₹59,040
+- **24K சுத்த தங்கம்:** 1 கிராம் தோராயமாக ₹7,940 - ₹8,050
+- **வெள்ளி:** 1 கிராம் தோராயமாக ₹94 - ₹98
 
-**2. வெள்ளி (Silver Rate):**
-- **1 கிராம் வெள்ளி:** ₹94 - ₹98
-- **1 கிலோ வெள்ளி:** ₹94,000 - ₹98,000
+*குறிப்பு: கடை நிலவரத்திற்கு ஏற்ப GST மற்றும் சேதாரம் மாறுபடலாம்.*`
+      : `🪙 **Today's Gold & Silver Price Breakdown (${dateStr}):**
 
-*குறிப்பு: நகைக்கடைகளில் வாங்கும்போது GST (3%) மற்றும் சேதாரம்/மஜூரி தனித்தனியாகக் கணக்கிடப்படும்.*`
-      : `🪙 **Today's Gold & Silver Price Breakdown in India (${dateStr}):**
-
-**1. Gold Rates:**
 - **22K Gold (Jewelry):** ~ ₹7,280 - ₹7,380 / gram | ~ ₹58,240 - ₹59,040 / sovereign (8g)
-- **24K Pure Gold:** ~ ₹7,940 - ₹8,050 / gram | ~ ₹63,520 - ₹64,400 / 8g
+- **24K Pure Gold:** ~ ₹7,940 - ₹8,050 / gram
+- **Silver:** ~ ₹94 - ₹98 / gram
 
-**2. Silver Rates:**
-- **Per Gram:** ~ ₹94 - ₹98
-- **Per Kilogram:** ~ ₹94,000 - ₹98,000
-
-*Note: Final prices in showrooms include 3% GST and applicable making/wastage charges.*`;
+*Note: Final prices depend on local showroom charges and GST.*`;
   }
 
-  // 6. Date / Time Queries
+  // 7. Date / Time Queries
   if (
     queryLower.includes('date') ||
     queryLower.includes('time') ||
-    queryLower.includes('enna naani') ||
     queryLower.includes('innaiku') ||
     queryLower.includes('today') ||
     queryLower.includes('இன்று') ||
@@ -584,174 +527,30 @@ Let me know if you need specific details about admission eligibility, fees, or c
       : `📅 **Current Date & Time:**\n- **Date:** ${dateStr}\n- **Time:** ${timeStr}`;
   }
 
-  // 7. Coding, Programming & Web Development Queries
-  if (
-    queryLower.includes('python') ||
-    queryLower.includes('react') ||
-    queryLower.includes('javascript') ||
-    queryLower.includes('typescript') ||
-    queryLower.includes('html') ||
-    queryLower.includes('css') ||
-    queryLower.includes('java') ||
-    queryLower.includes('sql') ||
-    queryLower.includes('node') ||
-    queryLower.includes('code') ||
-    queryLower.includes('coding') ||
-    queryLower.includes('debug') ||
-    queryLower.includes('error') ||
-    queryLower.includes('api') ||
-    queryLower.includes('database') ||
-    queryLower.includes('git') ||
-    queryLower.includes('website') ||
-    queryLower.includes('app') ||
-    queryLower.includes('mobile') ||
-    queryLower.includes('ai') ||
-    queryLower.includes('machine learning')
-  ) {
+  // 8. Coding & Technical Queries (uses strict word boundary matching)
+  const isTechQuery = /\b(python|react|javascript|typescript|html|css|java|sql|node|express|code|coding|program|programming|debug|debugging|error|bugs|api|database|git|github|website|mobile)\b/i.test(queryLower) || /\b(ai|ml|machine learning)\b/i.test(queryLower);
+
+  if (isTechQuery) {
     return isTa
-      ? "💻 **மென்பொருள் & கோடிங் ஆலோசனை (\"" + query + "\"):**\n\n" +
-        "**1. அறிமுகம் & முக்கியக் கருத்து:**\n" +
-        "உங்களின் கேள்வியான **\"" + query + "\"** மென்பொருள் உருவாக்கம் (Software Development) மற்றும் தொழில்நுட்பத் துறையில் மிக முக்கியமான ஒன்றாகும்.\n\n" +
-        "**2. முக்கிய கூறுகள் & சிறந்த வழிமுறைகள் (Best Practices):**\n" +
-        "- **Clean Architecture:** குறியீட்டை (Code) எளிமையாகவும், பராமரிக்க சுலபமாகவும் (Maintainable) எழுதுவது சிறந்தது.\n" +
-        "- **Debugging & Testing:** ஏதேனும் பிழைகள் (Errors) வந்தால் console.log() அல்லது Debugger கருவிகளைப் பயன்படுத்தி கண்டறியலாம்.\n" +
-        "- **Performance Optimization:** தேவையில்லாத Loop-கள் மற்றும் அதிகப்படியான State updates-களைத் தவிர்ப்பது வேகத்தை அதிகரிக்கும்.\n\n" +
-        "**3. மாதிரி குறியீடு உதாரணம் (Sample Code Snippet):**\n" +
-        "```javascript\n" +
-        "// Example: Async function pattern\n" +
-        "async function fetchData() {\n" +
-        "  try {\n" +
-        "    const response = await fetch('/api/data');\n" +
-        "    const result = await response.json();\n" +
-        "    console.log('Success:', result);\n" +
-        "  } catch (error) {\n" +
-        "    console.error('Error fetching data:', error);\n" +
-        "  }\n" +
-        "}\n" +
-        "```\n\n" +
-        "உங்களுக்கு இந்த கோடிங்கில் குறிப்பிட்ட பிழை (Error) அல்லது செயல்பாடு (Feature) தேவைப்பட்டால் அந்தக் கோடை அனுப்புங்கள், நான் உடனடியாகத் திருத்தித் தருகிறேன்!"
-      : "💻 **Software & Coding Insight for \"" + query + "\":**\n\n" +
-        "**1. Core Overview:**\n" +
-        "Your question regarding **\"" + query + "\"** relates to modern software architecture and web/app development best practices.\n\n" +
-        "**2. Key Technical Guidelines:**\n" +
-        "- **Modular Code Structure:** Keep components and functions self-contained and single-purpose.\n" +
-        "- **Error Handling & Async Logic:** Always wrap API requests in try/catch blocks or Promise handling.\n" +
-        "- **State Management & Optimization:** Ensure state updates are clean and memoized to avoid redundant renders.\n\n" +
-        "**3. Reference Code Pattern:**\n" +
-        "```typescript\n" +
-        "// Production-Ready Async Fetch Pattern\n" +
-        "export async function handleOperation<T>(endpoint: string): Promise<T | null> {\n" +
-        "  try {\n" +
-        "    const res = await fetch(endpoint);\n" +
-        "    if (!res.ok) throw new Error(`HTTP ${res.status}`);\n" +
-        "    return (await res.json()) as T;\n" +
-        "  } catch (err) {\n" +
-        "    console.error('Operation error:', err);\n" +
-        "    return null;\n" +
-        "  }\n" +
-        "}\n" +
-        "```\n\n" +
-        "Feel free to paste your exact code or error message, and I will debug or implement it for you right away!";
+      ? `உங்களின் **"${query}"** கேள்விக்கான விவரங்களை பகிர்கிறேன். தாங்கள் குறிப்பிட்ட கோடு அல்லது பிழை (Error) இருந்தால் அதை டைப் செய்யுங்கள், நான் உடனடியாக சரிசெய்து சரியான கோடை தருகிறேன்!`
+      : `Here to assist with your **"${query}"** request. If you have specific code, error messages, or features you want to implement, please paste them and I will guide you or write the exact code right away!`;
   }
 
-  // 8. Education, Exams & Career Queries
-  if (
-    queryLower.includes('exam') ||
-    queryLower.includes('study') ||
-    queryLower.includes('course') ||
-    queryLower.includes('degree') ||
-    queryLower.includes('university') ||
-    queryLower.includes('college') ||
-    queryLower.includes('cutoff') ||
-    queryLower.includes('engineering') ||
-    queryLower.includes('arts') ||
-    queryLower.includes('science') ||
-    queryLower.includes('job') ||
-    queryLower.includes('interview') ||
-    queryLower.includes('resume') ||
-    queryLower.includes('career')
-  ) {
-    return isTa
-      ? `📚 **கல்வி, தேர்வு & வேலைவாய்ப்பு வழிகாட்டி ("${query}"):**
-
-**1. முதன்மைத் தகவல்:**
-உங்களின் கேள்வியான **"${query}"** உயர்கல்வி மற்றும் தொழில்முறை வளர்ச்சிக்கு மிக முக்கியமான தலைப்பாகும்.
-
-**2. முக்கிய ஆலோசனைகள் (Key Recommendations):**
-- **முறையான திட்டமிடல்:** பாடத்திட்டத்தை (Syllabus) சிறு பகுதிகளாகப் பிரித்து தினமும் பதியுங்கள்.
-- **நடைமுறைப் பயிற்சி:** முந்தைய ஆண்டு வினாத்தாள்கள் (Previous Year Question Papers) மற்றும் மாதிரித் தேர்வுகளை (Mock Tests) எழுதிப் பாருங்கள்.
-- **திறன் மேம்பாடு:** படிப்போடு சேர்த்து Python, Communication, Problem Solving போன்ற வேலைவாய்ப்பிற்குத் தேவையான திறன்களை வளர்த்துக் கொள்ளுங்கள்.
-
-உங்களுக்கு குறிப்பிட்ட கல்லூரி, படிப்பு அல்லது தேர்வு அட்டவணை பற்றி கூடுதல் விவரம் தேவைப்பட்டால் தயங்காமல் கேளுங்கள்!`
-      : `📚 **Education & Career Guidance for "${query}":**
-
-**1. Strategic Overview:**
-Your topic **"${query}"** is key to academic success and career growth.
-
-**2. Core Action Steps:**
-- **Structured Schedule:** Divide your study goals into manageable daily modules with dedicated revision time.
-- **Practical Application:** Practice previous years' exam papers and sample tests under timed conditions.
-- **Skill Building:** Complement academic knowledge with in-demand practical skills like programming, data analysis, and effective communication.
-
-Let me know if you need specific course recommendations, cutoff analysis, or interview preparation tips!`;
-  }
-
-  // 9. Greetings / Small Talk
-  const cleanQ = queryLower.replace(/[!.,?]/g, '').trim();
-  if (
-    cleanQ === 'hi' ||
-    cleanQ === 'hello' ||
-    cleanQ === 'hey' ||
-    cleanQ === 'hii' ||
-    cleanQ === 'helo' ||
-    cleanQ === 'yo' ||
-    cleanQ.includes('vanakkam') ||
-    cleanQ.includes('வணக்கம்') ||
-    cleanQ.includes('epdi irukeenga') ||
-    cleanQ.includes('how are you') ||
-    cleanQ.includes('sollu')
-  ) {
-    return isTa
-      ? `வணக்கம்! நான் ஸ்வாதியா ஏஐ (Swatea AI). உங்களுக்கு இன்று நான் எப்படி உதவ வேண்டும்? உங்களின் சந்தேகங்கள் அல்லது கேள்விகளைத் தயங்காமல் கேட்கலாம்!`
-      : `Vanakkam! Hello! I am Swatea AI. How can I assist you today? Feel free to ask any question or share what you're working on!`;
-  }
-
-  // 10. Intelligent Rich Direct Answer Generator (NO generic template text)
+  // 9. Clean Direct Default Answer (NO unwanted templates or rigid headers)
   return isTa
-    ? `💡 **"${query}" - விரிவான விளக்கம் & தகவல்கள்:**
-
-**1. தலைப்பு அறிமுகம் (Overview):**
-**"${query}"** என்பது மிகவும் பயனுள்ள மற்றும் சுவாரஸ்யமான தலைப்பாகும். இத்தலைப்பு குறித்த முதன்மைத் தகவல்கள் கீழே எளிமையாகத் தொகுக்கப்பட்டுள்ளன.
-
-**2. முக்கிய அம்சங்கள் & குறிப்புகள் (Key Highlights):**
-- **அடிப்படைக் கருத்து:** உங்களின் கேள்வி நேரடி ஆய்வு மற்றும் நடைமுறை பயன்பாடுகளுடன் தொடர்புடையது.
-- **பயன்பாடுகள்:** இத்தலைப்பைப் பற்றிய தெளிவு அன்றாட அறிவு, கல்வி மற்றும் தொழில்முறை செயல்பாடுகளுக்கு பெரிதும் பயன்படும்.
-- **முக்கிய வழிகாட்டுதல்:** தெளிவான புரிதலுக்கு இதன் அடிப்படைக் கோட்பாடுகளைத் தொடர்ச்சியாக அறிவது சிறந்தது.
-
-**3. நிறைவுச் சுருக்கம் (Summary):**
-உங்களின் **"${query}"** பற்றிய கூடுதல் விவரங்கள், குறிப்பிட்ட பயன்பாடுகள் அல்லது கேள்விகள் தேவைப்பட்டால் தயங்காமல் கேளுங்கள். நான் உடனடியாக விரிவான விளக்கம் தருகிறேன்!`
-    : `💡 **Detailed Insight & Explanation for "${query}":**
-
-**1. Topic Overview:**
-Your query regarding **"${query}"** touches upon a key concept. Here is a clear, structured breakdown designed to give you direct value.
-
-**2. Essential Highlights & Concepts:**
-- **Core Concept:** Understanding the foundational principles behind "${query}" helps in practical decision-making and problem-solving.
-- **Key Takeaways:** Applying structured step-by-step methods produces the most reliable results.
-- **Best Practice:** Keep exploring specific sub-topics and practical examples to deepen your knowledge.
-
-**3. Summary & Next Steps:**
-If you need specific examples, code implementations, or deeper technical details on **"${query}"**, please ask and I will break it down further for you!`;
+      ? `உங்களின் கேள்வி **"${query}"** பெறப்பட்டது. இத்தலைப்பு குறித்து உங்களுக்கு என்ன குறிப்பிட்ட தகவல் அல்லது விளக்கம் தேவைப்படுகிறது என்று கூறினால், நான் உங்களுக்கு நேரடியாக பதிலளிக்கிறேன்!`
+      : `I have received your query regarding **"${query}"**. Please feel free to specify what details you need, and I will give you a direct answer!`;
 }
 
 // System Persona Prompts - Engineered with Autonomous Software Company AI (ULTIMATE) Master Intelligence
 const SYSTEM_PROMPTS = {
-  general: `You are Swatea AI (ஸ்வாதியா AI) — powered by Swatea AI & Gemini Master Intelligence.
+  general: `You are Swatea AI (ஸ்வாதியா AI) — powered by Swatea AI, Google Search Grounding & ChatGPT Master Intelligence.
 
-STRICT DIRECT ANSWER DIRECTIVE:
-- ANSWER DIRECTLY, PRECISELY, AND CONCISELY to the exact question or prompt asked.
-- DO NOT ADD UNNECESSARY INTROS, UNREQUESTED DISCLAIMERS, REPEATED HEADERS, OR UNRELATED FILLER.
-- Give only clean, direct, high-value information.` + `
+STRICT DIRECT & RELEVANT ANSWER DIRECTIVE:
+- ANSWER DIRECTLY, PRECISELY, AND ACCURATELY to the exact question or prompt asked.
+- EVERY ANSWER MUST BE 100% RELEVANT TO THE USER'S SPECIFIC QUERY.
+- DO NOT ADD UNRELATED INFORMATION, GENERIC TEMPLATES, UNNECESSARY INTROS, OR UNREQUESTED FILLER.
+- For queries requiring real-time facts, news, prices, gold rates, weather, current dates, or web search, ALWAYS leverage Google Search Grounding to provide 100% accurate, up-to-the-minute facts.` + `
 
 AUTONOMOUS SOFTWARE COMPANY MASTER IDENTITY:
 You operate as an Autonomous Software Company with unlimited expertise, composed of multiple virtual teams working simultaneously (CEO, Product Manager, Business Analyst, Software Architect, UI/UX Designers, Frontend/Backend/API Teams, AI/ML Teams, Database/Cloud/DevOps/Security Engineers, QA & Code Reviewers).
@@ -847,50 +646,48 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
   const explicitTamilScriptRequested = /\b(pure tamil|tamil script|தமிழ்ல|தமிழ்|in tamil)\b/i.test(message || '') || isTaScript;
 
   // Map requested model alias to official SDK model string with fallback handling
-  let targetModel = 'gemini-2.5-flash';
+  let targetModel = 'gemini-3.6-flash';
   let modelPersonaAddon = '';
   let autoEnableSearch = useWebSearch;
 
   if (model === 'gpt-4o') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [OPENAI GPT-4o ENGINE ACTIVE: OpenAI flagship multi-step reasoning, natural conversational intelligence, structured code generation, and omni-modal clarity.]';
   } else if (model === 'gpt-4o-mini') {
-    targetModel = 'gemini-2.0-flash-lite';
+    targetModel = 'gemini-3.1-flash-lite';
     modelPersonaAddon = ' [OPENAI GPT-4o MINI ENGINE ACTIVE: High speed, lightweight efficiency, quick accurate answers.]';
   } else if (model === 'claude-3-5-sonnet' || model === 'claude-sonnet-5') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [CLAUDE 3.5 SONNET ENGINE ACTIVE: Superior code generation, interactive web artifacts, elegant formatting, and nuanced comprehension.]';
   } else if (model === 'claude-3-opus' || model === 'claude-opus-4.8' || model === 'claude-mythos-5') {
-    targetModel = 'gemini-1.5-pro';
+    targetModel = 'gemini-3.1-pro-preview';
     modelPersonaAddon = ' [CLAUDE 3 OPUS ENGINE ACTIVE: Deepest strategic reasoning, complex academic logic, thorough analysis, zero truncation.]';
   } else if (model === 'claude-haiku-4.5') {
-    targetModel = 'gemini-2.0-flash-lite';
+    targetModel = 'gemini-3.1-flash-lite';
     modelPersonaAddon = ' [CLAUDE HAIKU 4.5 ENGINE ACTIVE: Lightning ultra-fast responsiveness with concise, clear explanations.]';
   } else if (model === 'deepseek-r1' || model === 'deepseek-v3') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [DEEPSEEK R1 / V3 REASONING ENGINE ACTIVE: Chain-of-Thought mathematical proofing, step-by-step logic breakdown, algorithmic programming.]';
   } else if (model === 'llama-3-3-70b') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [META LLAMA 3.3 70B ENGINE ACTIVE: Open-weights intelligence, strong multi-turn context retention, versatile domain knowledge.]';
   } else if (model === 'mistral-large') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [MISTRAL LARGE 2 ENGINE ACTIVE: Precision European AI, multi-lingual fluency, strict constraint following, clean code.]';
   } else if (model === 'perplexity-search') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     autoEnableSearch = true;
     modelPersonaAddon = ' [PERPLEXITY ONLINE SEARCH ENGINE ACTIVE: Live web research, real-time grounded facts, citation references, latest news synthesis.]';
   } else if (model === 'flux-imagen3') {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
     modelPersonaAddon = ' [FLUX / IMAGEN 3 ART ENGINE ACTIVE: Creative visual prompting, detailed artistic direction, hyper-realistic UI and graphic layout specs.]';
   } else if (model === 'gemini-3.6-pro' || model === 'gemini-pro') {
-    targetModel = 'gemini-1.5-pro';
+    targetModel = 'gemini-3.1-pro-preview';
     modelPersonaAddon = ' [GEMINI PRO ENGINE ACTIVE: Advanced multi-step logic & enterprise analysis.]';
   } else if (model === 'gemini-2.0-flash-lite' || model === 'gemini-3.1-flash-lite') {
-    targetModel = 'gemini-2.0-flash-lite';
-  } else if (model === 'gemini-2.0-flash') {
-    targetModel = 'gemini-2.0-flash';
+    targetModel = 'gemini-3.1-flash-lite';
   } else {
-    targetModel = 'gemini-2.5-flash';
+    targetModel = 'gemini-3.6-flash';
   }
 
   const ai = getGenAI(customApiKey);
@@ -949,7 +746,7 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
       maxOutputTokens: 8192,
     };
 
-    if (useWebSearch) {
+    if (autoEnableSearch || useWebSearch) {
       config.tools = [{ googleSearch: {} }];
     }
 
@@ -989,7 +786,7 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
   const reply = generateSmartFallbackReply(safeMsg, persona, explicitTamilScriptRequested);
   res.json({
     reply,
-    modelUsed: 'gemini-2.5-flash (Direct Gemini Core)',
+    modelUsed: 'gemini-3.6-flash (Direct Gemini Core)',
     tokenMetrics: {
       promptTokens: Math.round(safeMsg.length / 3.8),
       responseTokens: Math.round(reply.length / 3.8),
@@ -1016,7 +813,7 @@ app.post(['/api/search', '/search'], async (req, res) => {
     try {
       const genResult = await generateWithFallback(
         ai,
-        'gemini-2.5-flash',
+        'gemini-3.6-flash',
         `Search and summarize live accurate web findings for: "${query}"`,
         {
           tools: [{ googleSearch: {} }],
@@ -1081,7 +878,7 @@ app.post(['/api/code', '/code'], async (req, res) => {
         prompt = `Write enterprise ${language} code for:\n${task}`;
       }
 
-      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.coder,
         temperature: 0.3,
       });
@@ -1128,7 +925,7 @@ app.post(['/api/doc-analyze', '/doc-analyze'], async (req, res) => {
   if (ai) {
     try {
       const prompt = `Analyze this ${docType} text (${action}):\n\n${documentText}`;
-      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.analyst,
         temperature: 0.4,
       });
@@ -1186,7 +983,7 @@ app.post(['/api/vision', '/vision'], async (req, res) => {
 
       const genResult = await generateWithFallback(
         ai,
-        'gemini-2.5-flash',
+        'gemini-3.6-flash',
         [
           {
             role: 'user',
@@ -1297,7 +1094,7 @@ CRITICAL RULES:
         fullPrompt = `Modify and update this current HTML website based on the request: "${prompt}".\n\nCurrent HTML:\n${currentHtml.slice(0, 4000)}`;
       }
 
-      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', fullPrompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', fullPrompt, {
         systemInstruction: websiteSystemPrompt,
         temperature: 0.4,
       });
@@ -1441,7 +1238,7 @@ app.post(['/api/workflow', '/workflow'], async (req, res) => {
     try {
       const prompt = `Design an enterprise autonomous AI agent workflow DAG for: "${goal}" in industry "${industry}"`;
 
-      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.workflow,
         temperature: 0.5,
       });

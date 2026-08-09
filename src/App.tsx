@@ -57,13 +57,7 @@ export default function App() {
       console.error(e);
     }
   };
-  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('swatea_user_email') || null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
 
   const ADMIN_EMAILS = ['sathishkumar0076767@gmail.com', 'admin@swatea.ai'];
   const isAdmin = Boolean(currentUserEmail && ADMIN_EMAILS.includes(currentUserEmail.toLowerCase().trim()));
