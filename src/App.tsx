@@ -59,9 +59,9 @@ export default function App() {
   };
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('swatea_user_email') || 'user@swatea.ai';
+      return localStorage.getItem('swatea_user_email') || null;
     } catch {
-      return 'user@swatea.ai';
+      return null;
     }
   });
 
