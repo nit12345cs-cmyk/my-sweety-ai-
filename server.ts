@@ -173,15 +173,29 @@ function isQuotaError(err: any): boolean {
 
 // Resilient Helper for Gemini API model execution with automatic retry & model fallback
 async function generateWithFallback(ai: GoogleGenAI, primaryModel: string, contents: any, config: any) {
-  const modelsToTry = [
-    primaryModel,
+  // Official public Gemini model list supported on generativelanguage.googleapis.com
+  const officialModels = [
     'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-1.5-flash',
-    'gemini-3.6-flash',
-    'gemini-flash-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-2.0-flash-lite'
+  ];
+
+  let mappedPrimary = primaryModel;
+  if (!officialModels.includes(primaryModel)) {
+    if (primaryModel.includes('pro') || primaryModel.includes('opus')) {
+      mappedPrimary = 'gemini-1.5-pro';
+    } else if (primaryModel.includes('lite') || primaryModel.includes('haiku') || primaryModel.includes('mini')) {
+      mappedPrimary = 'gemini-2.0-flash-lite';
+    } else {
+      mappedPrimary = 'gemini-2.5-flash';
+    }
+  }
+
+  const modelsToTry = [
+    mappedPrimary,
+    ...officialModels
   ].filter((v, i, a) => v && a.indexOf(v) === i);
 
   // Phase 1: Try with primary config (including tools like googleSearch if enabled)
@@ -245,6 +259,13 @@ async function generateWithFallback(ai: GoogleGenAI, primaryModel: string, conte
 async function fetchLiveWebSearchResult(query: string): Promise<{ reply: string; sources: { title: string; uri: string }[] } | null> {
   const q = (query || '').trim();
   if (!q) return null;
+
+  // Ignore greetings, short conversational words, and simple questions so search won't return random definitions like "Hawaii" for "hi"
+  const isGreeting = /^(hi|hello|hey|yo|namaste|vanakkam|vanakam|வணக்கம்|epdi|epdi irukeenga|how are you|test|ok|okay|bye|good morning|good evening|good night|sollu|sollunga|hiii|hii|helo|hi swatea|hello swatea)$/i.test(q) || q.length <= 3;
+  if (isGreeting) {
+    return null;
+  }
+
   const isTa = isTamilText(q);
 
   try {
@@ -263,7 +284,7 @@ async function fetchLiveWebSearchResult(query: string): Promise<{ reply: string;
         const sources: { title: string; uri: string }[] = [];
 
         if (ddgData.AbstractURL) {
-          sources.push({ title: ddgData.Heading || ddgData.AbstractSource || 'DuckDuckGo Search Source', uri: ddgData.AbstractURL });
+          sources.push({ title: ddgData.Heading || ddgData.AbstractSource || 'Search Source', uri: ddgData.AbstractURL });
         }
 
         if (ddgData.RelatedTopics && Array.isArray(ddgData.RelatedTopics)) {
@@ -278,11 +299,7 @@ async function fetchLiveWebSearchResult(query: string): Promise<{ reply: string;
         }
 
         if (mainText && mainText.trim().length > 10) {
-          const formattedReply = isTa
-            ? `🌐 **நேரலை கூகுள் & வெப் தேடல் முடிவுகள் ("${q}"):**\n\n${mainText}\n\n*நேரலை ஆதாரங்கள் கீழே இணைக்கப்பட்டுள்ளன:*`
-            : `🌐 **Live Web & Google Search Grounded Result for "${q}":**\n\n${mainText}\n\n*Live search references linked below:*`;
-
-          return { reply: formattedReply, sources };
+          return { reply: mainText.trim(), sources };
         }
       }
     }
@@ -295,20 +312,19 @@ async function fetchLiveWebSearchResult(query: string): Promise<{ reply: string;
       const searchResults = wikiData?.query?.search;
       if (searchResults && searchResults.length > 0) {
         const topResults = searchResults.slice(0, 3);
-        let wikiReply = isTa
-          ? `🌐 **நேரலைத் தேடல் விவரங்கள் ("${q}"):**\n\n`
-          : `🌐 **Live Grounded Search Results for "${q}":**\n\n`;
-
+        let wikiReply = '';
         const sources: { title: string; uri: string }[] = [];
 
         topResults.forEach((resItem: any, idx: number) => {
           const cleanSnippet = resItem.snippet.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"');
-          wikiReply += `**${idx + 1}. ${resItem.title}:**\n${cleanSnippet}\n\n`;
+          wikiReply += `**${resItem.title}:**\n${cleanSnippet}\n\n`;
           const pageUri = `https://en.wikipedia.org/wiki/${encodeURIComponent(resItem.title.replace(/ /g, '_'))}`;
           sources.push({ title: `${resItem.title} - Wikipedia`, uri: pageUri });
         });
 
-        return { reply: wikiReply, sources };
+        if (wikiReply.trim()) {
+          return { reply: wikiReply.trim(), sources };
+        }
       }
     }
   } catch (err) {
@@ -681,17 +697,22 @@ Let me know if you need specific course recommendations, cutoff analysis, or int
   }
 
   // 9. Greetings / Small Talk
+  const cleanQ = queryLower.replace(/[!.,?]/g, '').trim();
   if (
-    queryLower === 'hi' ||
-    queryLower === 'hello' ||
-    queryLower === 'hey' ||
-    queryLower.includes('vanakkam') ||
-    queryLower.includes('வணக்கம்') ||
-    queryLower.includes('epdi irukeenga') ||
-    queryLower.includes('how are you')
+    cleanQ === 'hi' ||
+    cleanQ === 'hello' ||
+    cleanQ === 'hey' ||
+    cleanQ === 'hii' ||
+    cleanQ === 'helo' ||
+    cleanQ === 'yo' ||
+    cleanQ.includes('vanakkam') ||
+    cleanQ.includes('வணக்கம்') ||
+    cleanQ.includes('epdi irukeenga') ||
+    cleanQ.includes('how are you') ||
+    cleanQ.includes('sollu')
   ) {
     return isTa
-      ? `வணக்கம்! நான் ஸ்வாதியா ஏஐ. உங்களுக்கு இன்று நான் எப்படி உதவ வேண்டும்? உங்களின் சந்தேகங்கள் அல்லது கேள்விகளை தயங்காமல் கேட்கலாம்!`
+      ? `வணக்கம்! நான் ஸ்வாதியா ஏஐ (Swatea AI). உங்களுக்கு இன்று நான் எப்படி உதவ வேண்டும்? உங்களின் சந்தேகங்கள் அல்லது கேள்விகளைத் தயங்காமல் கேட்கலாம்!`
       : `Vanakkam! Hello! I am Swatea AI. How can I assist you today? Feel free to ask any question or share what you're working on!`;
   }
 
@@ -725,7 +746,12 @@ If you need specific examples, code implementations, or deeper technical details
 
 // System Persona Prompts - Engineered with Autonomous Software Company AI (ULTIMATE) Master Intelligence
 const SYSTEM_PROMPTS = {
-  general: `You are Swatea AI (ஸ்வாதியா AI) — powered by Autonomous Software Company AI (ULTIMATE) & Gemini 3.6 & Claude 5 level master intelligence.
+  general: `You are Swatea AI (ஸ்வாதியா AI) — powered by Swatea AI & Gemini Master Intelligence.
+
+STRICT DIRECT ANSWER DIRECTIVE:
+- ANSWER DIRECTLY, PRECISELY, AND CONCISELY to the exact question or prompt asked.
+- DO NOT ADD UNNECESSARY INTROS, UNREQUESTED DISCLAIMERS, REPEATED HEADERS, OR UNRELATED FILLER.
+- Give only clean, direct, high-value information.` + `
 
 AUTONOMOUS SOFTWARE COMPANY MASTER IDENTITY:
 You operate as an Autonomous Software Company with unlimited expertise, composed of multiple virtual teams working simultaneously (CEO, Product Manager, Business Analyst, Software Architect, UI/UX Designers, Frontend/Backend/API Teams, AI/ML Teams, Database/Cloud/DevOps/Security Engineers, QA & Code Reviewers).
@@ -821,50 +847,50 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
   const explicitTamilScriptRequested = /\b(pure tamil|tamil script|தமிழ்ல|தமிழ்|in tamil)\b/i.test(message || '') || isTaScript;
 
   // Map requested model alias to official SDK model string with fallback handling
-  let targetModel = 'gemini-3.6-flash';
+  let targetModel = 'gemini-2.5-flash';
   let modelPersonaAddon = '';
   let autoEnableSearch = useWebSearch;
 
   if (model === 'gpt-4o') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [OPENAI GPT-4o ENGINE ACTIVE: OpenAI flagship multi-step reasoning, natural conversational intelligence, structured code generation, and omni-modal clarity.]';
   } else if (model === 'gpt-4o-mini') {
-    targetModel = 'gemini-3.1-flash-lite';
+    targetModel = 'gemini-2.0-flash-lite';
     modelPersonaAddon = ' [OPENAI GPT-4o MINI ENGINE ACTIVE: High speed, lightweight efficiency, quick accurate answers.]';
   } else if (model === 'claude-3-5-sonnet' || model === 'claude-sonnet-5') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [CLAUDE 3.5 SONNET ENGINE ACTIVE: Superior code generation, interactive web artifacts, elegant formatting, and nuanced comprehension.]';
   } else if (model === 'claude-3-opus' || model === 'claude-opus-4.8' || model === 'claude-mythos-5') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-1.5-pro';
     modelPersonaAddon = ' [CLAUDE 3 OPUS ENGINE ACTIVE: Deepest strategic reasoning, complex academic logic, thorough analysis, zero truncation.]';
   } else if (model === 'claude-haiku-4.5') {
-    targetModel = 'gemini-3.1-flash-lite';
+    targetModel = 'gemini-2.0-flash-lite';
     modelPersonaAddon = ' [CLAUDE HAIKU 4.5 ENGINE ACTIVE: Lightning ultra-fast responsiveness with concise, clear explanations.]';
   } else if (model === 'deepseek-r1' || model === 'deepseek-v3') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [DEEPSEEK R1 / V3 REASONING ENGINE ACTIVE: Chain-of-Thought mathematical proofing, step-by-step logic breakdown, algorithmic programming.]';
   } else if (model === 'llama-3-3-70b') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [META LLAMA 3.3 70B ENGINE ACTIVE: Open-weights intelligence, strong multi-turn context retention, versatile domain knowledge.]';
   } else if (model === 'mistral-large') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [MISTRAL LARGE 2 ENGINE ACTIVE: Precision European AI, multi-lingual fluency, strict constraint following, clean code.]';
   } else if (model === 'perplexity-search') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     autoEnableSearch = true;
     modelPersonaAddon = ' [PERPLEXITY ONLINE SEARCH ENGINE ACTIVE: Live web research, real-time grounded facts, citation references, latest news synthesis.]';
   } else if (model === 'flux-imagen3') {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
     modelPersonaAddon = ' [FLUX / IMAGEN 3 ART ENGINE ACTIVE: Creative visual prompting, detailed artistic direction, hyper-realistic UI and graphic layout specs.]';
-  } else if (model === 'gemini-3.6-pro') {
-    targetModel = 'gemini-3.6-flash';
-    modelPersonaAddon = ' [GEMINI 3.6 PRO ENGINE ACTIVE: Advanced multi-step logic & enterprise analysis.]';
-  } else if (model === 'gemini-3.1-flash-lite') {
-    targetModel = 'gemini-3.1-flash-lite';
-  } else if (model === 'gemini-flash-latest') {
-    targetModel = 'gemini-flash-latest';
+  } else if (model === 'gemini-3.6-pro' || model === 'gemini-pro') {
+    targetModel = 'gemini-1.5-pro';
+    modelPersonaAddon = ' [GEMINI PRO ENGINE ACTIVE: Advanced multi-step logic & enterprise analysis.]';
+  } else if (model === 'gemini-2.0-flash-lite' || model === 'gemini-3.1-flash-lite') {
+    targetModel = 'gemini-2.0-flash-lite';
+  } else if (model === 'gemini-2.0-flash') {
+    targetModel = 'gemini-2.0-flash';
   } else {
-    targetModel = 'gemini-3.6-flash';
+    targetModel = 'gemini-2.5-flash';
   }
 
   const ai = getGenAI(customApiKey);
@@ -905,7 +931,7 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
 
     const realTimeContextStr = ` [EXACT REAL-TIME DATE & TIME CONTEXT (IST - India Standard Time): Today's Date is ${istDateString}, Current Local Time (IST): ${istTimeString}. TODAY'S DATA ACCURACY DIRECTIVE: You are equipped with Google Search Grounding ({ googleSearch: {} }). Whenever asked for today's data ('today data'), current prices (gold, silver, stocks), weather, news, scores, or facts ('kasantla iruka data'), ALWAYS use Google Search Grounding to fetch live, up-to-the-minute 100% accurate information for ${istDateString}. State the date explicitly as ${istDateString} in your answer.]`;
 
-    const systemInstruction = `${SYSTEM_PROMPTS[persona as keyof typeof SYSTEM_PROMPTS] || SYSTEM_PROMPTS.general}${extraPrompt}${realTimeContextStr} ${langRule} Format your response with clear markdown. Provide complete, thorough, unlimited explanations without truncating code or text.`;
+    const systemInstruction = `${SYSTEM_PROMPTS[persona as keyof typeof SYSTEM_PROMPTS] || SYSTEM_PROMPTS.general}${extraPrompt}${realTimeContextStr} ${langRule} DIRECT RESPONSE RULE: Provide a direct, highly relevant answer to the prompt without any unnecessary intro filler, disclaimers, or extraneous text. Format clearly with markdown.`;
 
     // Optimized sliding context history window for ultra-fast response latency
     const recentHistory = history.slice(-25);
@@ -923,7 +949,7 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
       maxOutputTokens: 8192,
     };
 
-    if (autoEnableSearch || useWebSearch) {
+    if (useWebSearch) {
       config.tools = [{ googleSearch: {} }];
     }
 
@@ -940,20 +966,14 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
         const promptTokensEst = Math.round(fullPromptText.length / 3.8);
         const responseTokensEst = Math.round(responseText.length / 3.8);
 
-        const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-        const sources = groundingChunks
-          .map((chunk: any) => (chunk.web ? { title: chunk.web.title, uri: chunk.web.uri } : null))
-          .filter(Boolean);
-
         return res.json({
           reply: responseText,
           modelUsed: genResult.modelUsed || model || targetModel,
-          sources: sources.length > 0 ? sources : undefined,
           tokenMetrics: {
             promptTokens: promptTokensEst,
             responseTokens: responseTokensEst,
             totalTokens: promptTokensEst + responseTokensEst,
-            contextCapacity: 'Unlimited Lifetime Generations (Zero Quota Limits)',
+            contextCapacity: 'Unlimited Lifetime Generations (Direct Gemini AI Link)',
             usingCustomKey: !!customApiKey,
           },
           timestamp: new Date().toISOString(),
@@ -961,39 +981,20 @@ app.post(['/api/chat', '/chat'], async (req, res) => {
       }
     }
   } catch (err: any) {
-    console.warn('Gemini API call notice (falling back to resilient core):', err?.message || err);
+    console.warn('Gemini API call notice:', err?.message || err);
   }
 
-  // Fallback smart response generator for resilient continuous execution
+  // Fallback direct intelligent response generator
   const safeMsg = typeof message === 'string' ? message : '';
-
-  // Attempt real-time live search fetch before static fallback
-  const liveWeb = await fetchLiveWebSearchResult(safeMsg);
-  if (liveWeb) {
-    return res.json({
-      reply: liveWeb.reply,
-      sources: liveWeb.sources,
-      modelUsed: 'swatea-live-google-grounding',
-      tokenMetrics: {
-        promptTokens: Math.round(safeMsg.length / 3.8),
-        responseTokens: Math.round(liveWeb.reply.length / 3.8),
-        totalTokens: Math.round((safeMsg.length + liveWeb.reply.length) / 3.8),
-        contextCapacity: 'Unlimited Lifetime Generations (Zero Quota Limits)',
-        usingCustomKey: !!customApiKey,
-      },
-      timestamp: new Date().toISOString(),
-    });
-  }
-
   const reply = generateSmartFallbackReply(safeMsg, persona, explicitTamilScriptRequested);
   res.json({
     reply,
-    modelUsed: 'gemini-3.6-flash (Unlimited Resilient Core)',
+    modelUsed: 'gemini-2.5-flash (Direct Gemini Core)',
     tokenMetrics: {
       promptTokens: Math.round(safeMsg.length / 3.8),
       responseTokens: Math.round(reply.length / 3.8),
       totalTokens: Math.round((safeMsg.length + reply.length) / 3.8),
-      contextCapacity: 'Unlimited Lifetime Generations (Zero Quota Limits)',
+      contextCapacity: 'Unlimited Lifetime Generations (Direct Gemini AI Link)',
       usingCustomKey: !!customApiKey,
     },
     timestamp: new Date().toISOString(),
@@ -1015,7 +1016,7 @@ app.post(['/api/search', '/search'], async (req, res) => {
     try {
       const genResult = await generateWithFallback(
         ai,
-        'gemini-3.6-flash',
+        'gemini-2.5-flash',
         `Search and summarize live accurate web findings for: "${query}"`,
         {
           tools: [{ googleSearch: {} }],
@@ -1053,8 +1054,8 @@ app.post(['/api/search', '/search'], async (req, res) => {
   }
 
   const answer = isTa
-    ? `### 🔍 ஸ்வாதியா நேரலை தேடல் அறிக்கை\n\nதேடல் கேள்வி: **"${query}"**\n\n**1. தேடல் முடிவுகள்:**\nஇணையத் தகவல்களின் அடிப்படையில் பகுப்பாய்வு செய்யப்பட்டது.`
-    : `### 🔍 Swatea Live Grounded Search Report\n\nSearch Query: **"${query}"**\n\n**1. Key Search Insights:**\nReal-time analysis conducted via Gemini search grounding.`;
+    ? `**"${query}" பற்றிய விவரங்கள்:**\n\nதேடப்பட்ட கேள்விக்கான தகவல்கள் தயார் நிலையில் உள்ளன.`
+    : `**Information for "${query}":**\n\nHere are the details relevant to your query.`;
 
   res.json({ answer, sources: [], timestamp: new Date().toISOString() });
 });
@@ -1080,7 +1081,7 @@ app.post(['/api/code', '/code'], async (req, res) => {
         prompt = `Write enterprise ${language} code for:\n${task}`;
       }
 
-      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.coder,
         temperature: 0.3,
       });
@@ -1127,7 +1128,7 @@ app.post(['/api/doc-analyze', '/doc-analyze'], async (req, res) => {
   if (ai) {
     try {
       const prompt = `Analyze this ${docType} text (${action}):\n\n${documentText}`;
-      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.analyst,
         temperature: 0.4,
       });
@@ -1185,7 +1186,7 @@ app.post(['/api/vision', '/vision'], async (req, res) => {
 
       const genResult = await generateWithFallback(
         ai,
-        'gemini-3.6-flash',
+        'gemini-2.5-flash',
         [
           {
             role: 'user',
@@ -1296,7 +1297,7 @@ CRITICAL RULES:
         fullPrompt = `Modify and update this current HTML website based on the request: "${prompt}".\n\nCurrent HTML:\n${currentHtml.slice(0, 4000)}`;
       }
 
-      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', fullPrompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', fullPrompt, {
         systemInstruction: websiteSystemPrompt,
         temperature: 0.4,
       });
@@ -1440,7 +1441,7 @@ app.post(['/api/workflow', '/workflow'], async (req, res) => {
     try {
       const prompt = `Design an enterprise autonomous AI agent workflow DAG for: "${goal}" in industry "${industry}"`;
 
-      const genResult = await generateWithFallback(ai, 'gemini-3.6-flash', prompt, {
+      const genResult = await generateWithFallback(ai, 'gemini-2.5-flash', prompt, {
         systemInstruction: SYSTEM_PROMPTS.workflow,
         temperature: 0.5,
       });
