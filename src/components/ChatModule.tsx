@@ -1371,6 +1371,31 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
                         </div>
                       )}
 
+                      {/* Google Search Sources & Citation Links */}
+                      {!isUser && msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-3 pt-2.5 border-t border-slate-800/80">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 mb-2">
+                            <Globe className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                            <span>{isTamil ? '🌐 கூகுள் தேடல் ஆதாரங்கள் & லிங்குகள்:' : '🌐 Google Search Grounded Sources & Links:'}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.sources.map((src, sIdx) => (
+                              <a
+                                key={sIdx}
+                                href={src.uri}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/80 text-[11px] font-medium transition-all hover:scale-102 shadow-sm truncate max-w-[240px]"
+                                title={src.title || src.uri}
+                              >
+                                <span className="truncate">{src.title || src.uri}</span>
+                                <ChevronRight className="w-3 h-3 text-amber-400 shrink-0" />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* User Edit Button on hover */}
                       {isUser && editingMsgId !== msg.id && (
                         <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-700 shadow-md">
