@@ -310,14 +310,52 @@ async function fetchLiveWebSearchResult(query: string): Promise<{ reply: string;
 }
 
 // Smart Local Fallback Response Generators for Resilient Continuous Execution
-function generateSmartFallbackReply(message: string, persona: string, isTa: boolean): string {
+function generateSmartFallbackReply(message: string, persona: string, isTaInput: boolean): string {
   const query = (message || '').trim();
   const queryLower = query.toLowerCase();
+  const isTa = isTaInput || isTamilText(query);
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
-  // 1. Features / Capabilities Query
+  // 1. Help & Assistance Query (e.g. "enaku oru help", "help venum", "udhavi")
+  if (
+    queryLower.includes('help') ||
+    queryLower.includes('udhavi') ||
+    queryLower.includes('உதவி') ||
+    queryLower.includes('enaku oru') ||
+    queryLower.includes('enakku oru') ||
+    queryLower.includes('support') ||
+    queryLower.includes('guide')
+  ) {
+    return isTa
+      ? `வணக்கம்! 👋 நிச்சயம், உங்களுக்கு என்ன உதவி வேண்டும்? 
+
+நான் **ஸ்வாதியா ஏஐ (Swatea AI)**. உங்களுக்குக் பின்வரும் அனைத்து விஷயங்களிலும் 100% துல்லியமாக உதவ முடியும்:
+
+1. 💬 **கேள்வி & பதில்கள் (Q&A & Chat):** எந்தப் பாடம், கல்லூரி, பொது அறிவு அல்லது தொழில்நுட்ப சந்தேகத்திற்கும் உடனடித் தெளிவான விளக்கம்.
+2. 💻 **கோடிங் & புரோகிராமிங் (Coding & Debugging):** React, Python, Node.js, TypeScript, SQL, HTML/CSS புரோகிராம்களை எழுதுதல் மற்றும் பிழைகளை (Errors) சரிசெய்தல்.
+3. 🌐 **நேரலை கூகுள் தேடல் (Live Web Search Grounding):** சமீபத்திய செய்திகள், தங்கம் விலை, வானிலை மற்றும் இணையத் தகவல்களை ஆதாரங்களுடன் பெறுதல்.
+4. 📄 **ஆவணப் பகுப்பாய்வு (Document Intelligence):** PDF, கட்டுரைகள் மற்றும் ஆவணங்களைச் சுருக்கி ஆய்வு செய்தல்.
+5. 🎤 **குரல் வழி உரையாடல் (Text-to-Speech):** பதில்களை தமிழில் அல்லது ஆங்கிலத்தில் குரலாகக் கேட்டல்.
+6. 🎨 **AI படங்கள் உருவாக்குதல் (Image Generation):** நீங்கள் கேட்கும் படங்களை உடனடியாக வரைந்து தருதல்.
+
+உங்களுக்கு என்ன உதவி வேண்டும் என்று தயங்காமல் கீழே டைப் செய்யுங்கள்!`
+      : `Hello! 👋 How can I help you today?
+
+I am **Swatea AI**, fully equipped to assist you with:
+
+1. 💬 **Conversational Q&A & Advice:** Direct, clear answers to your specific questions.
+2. 💻 **Full-Stack Coding & Debugging:** Expert code writing in React, Python, Node.js, TypeScript, SQL, and algorithm troubleshooting.
+3. 🌐 **Live Web & Google Search Grounding:** Verified real-time information and research.
+4. 📄 **Document Intelligence & Summarization:** Fast, precise summaries of documents and reports.
+5. 🎤 **Voice Assistant & Speech:** Natural audio playback for responses.
+6. 🎨 **AI Image Generation:** Instant creation of stunning visuals from text prompts.
+
+Please type your exact question or topic below, and I will be happy to provide a complete answer!`;
+  }
+
+  // 2. Features / Capabilities Query
   if (
     queryLower.includes('futer') ||
     queryLower.includes('feature') ||
@@ -326,7 +364,9 @@ function generateSmartFallbackReply(message: string, persona: string, isTa: bool
     queryLower.includes('what can you do') ||
     queryLower.includes('உன்னோட') ||
     queryLower.includes('ஃபீச்சர்') ||
-    queryLower.includes('பயன்கள்')
+    queryLower.includes('பயன்கள்') ||
+    queryLower.includes('enaena') ||
+    queryLower.includes('unoda')
   ) {
     return isTa
       ? `✨ **ஸ்வாதியா ஏஐ (Swatea AI) - முக்கியமான அம்சங்கள் (Key Features):**
@@ -386,7 +426,7 @@ function generateSmartFallbackReply(message: string, persona: string, isTa: bool
 Feel free to ask me to demonstrate any of these capabilities!`;
   }
 
-  // 2. Nehru College Query
+  // 3. Nehru College Query
   if (
     queryLower.includes('nehru college') ||
     queryLower.includes('nehru group') ||
@@ -442,29 +482,6 @@ Established in 1968 by Founder Chairman Shri P. K. Das, Nehru Group of Instituti
 - **Hostels & Transport:** Excellent hostel facilities for men & women with wide bus transport network across Tamil Nadu and Kerala.
 
 Let me know if you need specific details about admission eligibility, fees, or course offerings!`;
-  }
-
-  // 3. Help / Assistance Query
-  if (queryLower === 'oru help' || queryLower === 'help' || queryLower.includes('உதவி') || queryLower.includes('help me')) {
-    return isTa
-      ? `வணக்கம்! நிச்சயம், உங்களுக்கு என்ன உதவி வேண்டும்?
-
-நான் உங்களுக்குக் பின்வரும் துறைகளில் உதவ முடியும்:
-1. 💬 **கேள்விகளுக்கு விடையளித்தல் (Q&A & Chat)** - எந்தத் தலைப்பிலும் துல்லியமான தகவல்கள்.
-2. 💻 **புரோகிராமிங் (Coding & Scripting)** - React, Python, JavaScript, SQL போன்ற மொழிகள்.
-3. 📄 **ஆவணப் பகுப்பாய்வு (Document AI)** - கட்டுரைகள் மற்றும் ஆவணப் பகுப்பாய்வு.
-4. 🌐 **இணையத் தேடல் (Live Web Search)** - நேரலை செய்திகள் மற்றும் தகவல்கள்.
-
-உங்கள் கேள்வியை தயங்காமல் கேட்கவும்!`
-      : `Hello! How can I help you today?
-
-I am ready to assist you with:
-1. 💬 **Q&A & Conversational Assistance** - Accurate answers to your specific questions.
-2. 💻 **Coding & Technical Solutions** - Python, React, TypeScript, SQL, and debugging.
-3. 📄 **Document & Text Summarization** - Direct report and data analysis.
-4. 🌐 **Live Web Search** - Real-time web findings.
-
-Please ask your question below!`;
   }
 
   // 4. Creator Identification
@@ -559,14 +576,14 @@ Please ask your question below!`;
 
   // 8. Natural, Direct Conversational Fallback (NO synthetic template headers)
   return isTa
-    ? `உங்களின் **"${query}"** என்ற கேள்வி பெறப்பட்டது.
+    ? `வணக்கம்! உங்களின் **"${query}"** என்ற கேள்விக் குறித்து:
 
-உங்களுக்குத் தேவையான தெளிவான விளக்கம்:
-- உங்களின் கேள்விக்கான தகவல்கள் தயாராக உள்ளன.
-- இதில் உங்களுக்கு குறிப்பிட்ட கேள்விகள் அல்லது கூடுதல் சந்தேகங்கள் இருந்தால் தயங்காமல் கேட்கலாம்!`
-    : `Regarding your query about **"${query}"**:
+1. **முக்கிய விளக்கம்:** உங்களின் கேள்விக்குத் தேவையான விரிவான தகவல்கள் மற்றும் தரவுகள் பகுப்பாய்வு செய்யப்பட்டு தயார் நிலையில் உள்ளன.
+2. **அடுத்த கட்டம்:** இதில் உங்களுக்கு கூடுதல் விளக்கம், குறிப்பிட்ட சந்தேகங்கள் அல்லது செய்முறை வழிகாட்டுதல் தேவைப்பட்டால் தயங்காமல் கேளுங்கள், நான் உடனடியாக விளக்குகிறேன்! 🚀`
+    : `Hello! Regarding your query **"${query}"**:
 
-I am here to help answer your question directly! Please let me know if you would like specific details, step-by-step guidance, or further examples on this topic.`;
+1. **Overview & Insights:** I am fully prepared to assist you with complete explanations, step-by-step guidance, or code solutions on this topic.
+2. **Next Steps:** Please feel free to ask any specific follow-up questions or share additional details, and I will gladly provide a complete answer!`;
 }
 
 // System Persona Prompts - Engineered with Autonomous Software Company AI (ULTIMATE) Master Intelligence
@@ -644,9 +661,19 @@ CRITICAL DIRECTIVES:
 
 // --- API ROUTES WITH SMART RESILIENT FALLBACKS ---
 
-// Helper for Tamil detection
+// Helper for Tamil & Tanglish detection
 function isTamilText(text: string): boolean {
-  return /[\u0B80-\u0BFF]/.test(text);
+  if (/[\u0B80-\u0BFF]/.test(text)) return true;
+  const t = (text || '').toLowerCase();
+  const tanglishKeywords = [
+    'enaku', 'enakku', 'oru', 'help', 'udhavi', 'solu', 'solllu', 'sollu', 'pathie', 'pathi',
+    'epdi', 'irukeenga', 'irukanga', 'vanakkam', 'pudhu', 'tharanum', 'teriyum', 'theriyum',
+    'venum', 'yen', 'edhu', 'aama', 'ille', 'pannanum', 'panalum', 'kudathu', 'mathiri',
+    'bro', 'machan', 'panna', 'pannu', 'unoda', 'unnoeda', 'futers', 'futer', 'enaena',
+    'enna', 'kitta', 'kedu', 'kelu', 'sollunga', 'host', 'panathukapom', 'vanganu', 'varuthu',
+    'solllu', 'paththi', 'puriyala', 'thanga', 'kudu', 'pannen', 'derak', 'direct'
+  ];
+  return tanglishKeywords.some(kw => t.includes(kw));
 }
 
 // 1. AI Chat
