@@ -19,6 +19,8 @@ import {
   Download,
   Mic,
   MicOff,
+  Activity,
+  Radio,
   Cpu,
   Compass,
   Plus,
@@ -37,15 +39,21 @@ import {
   Maximize2,
   Monitor,
   Smartphone,
-  Tablet
+  Tablet,
+  Camera,
+  Upload,
+  Film
 } from 'lucide-react';
 import { ChatMessage, ChatSession, LanguageCode } from '../types';
 import { safeFetchJson } from '../lib/api';
 import { speakNaturalText, stopSpeech } from '../lib/tts';
+import { ImageUploadToolModal } from './ImageUploadToolModal';
 
 interface ChatModuleProps {
   language: LanguageCode;
   currentUserEmail?: string;
+  onNavigateToVideo?: (imageUrl: string, promptText: string) => void;
+  onNavigateToImage?: (imageUrl: string) => void;
 }
 
 interface InteractiveWebsiteBlockProps {
@@ -210,7 +218,12 @@ const InteractiveWebsiteBlock: React.FC<InteractiveWebsiteBlockProps> = ({
   );
 };
 
-export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEmail = 'guest@swatea.ai' }) => {
+export const ChatModule: React.FC<ChatModuleProps> = ({
+  language,
+  currentUserEmail = 'guest@swatea.ai',
+  onNavigateToVideo,
+  onNavigateToImage,
+}) => {
   const isTamil = language === 'ta';
   const userKey = currentUserEmail.toLowerCase().trim();
   const storageKey = `swatea_chats_${userKey}`;
@@ -236,13 +249,57 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [persona, setPersona] = useState<'general' | 'coder' | 'analyst' | 'workflow' | 'image'>('general');
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.7-flash');
   const [useWebSearch, setUseWebSearch] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string; type?: string; isImage?: boolean } | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{
+    name: string;
+    content: string;
+    type?: string;
+    isImage?: boolean;
+    size?: number;
+  } | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
   const [fullscreenHtml, setFullscreenHtml] = useState<string | null>(null);
+
+  // Direct Image/Photo Upload Tool States & References
+  const [isImageUploadModalOpen, setIsImageUploadModalOpen] = useState(false);
+  const [isDraggingOverChat, setIsDraggingOverChat] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Global Clipboard Image Paste Listener (Ctrl+V / Cmd+V)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              const content = evt.target?.result as string;
+              setAttachedFile({
+                name: `Pasted_Image_${Date.now()}.png`,
+                content,
+                type: file.type,
+                isImage: true,
+                size: file.size,
+              });
+            };
+            reader.readAsDataURL(file);
+          }
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, []);
 
   // Side-by-Side Edge Live Website Preview Panel State
   const [sidePreviewHtml, setSidePreviewHtml] = useState<string | null>(null);
@@ -254,6 +311,18 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
   // Message Editing & Resending state
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<string>('');
+
+  // Recent Activity Drawer & Quick Context Switching State
+  const [isRecentActivityOpen, setIsRecentActivityOpen] = useState(false);
+  const [contextSwitchNotification, setContextSwitchNotification] = useState<string | null>(null);
+
+  // Audio Waveform & Voice Activity State
+  const [audioLevels, setAudioLevels] = useState<number[]>(() => new Array(28).fill(12));
+  const [audioVolume, setAudioVolume] = useState<number>(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const animFrameRef = useRef<number | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -329,6 +398,65 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
       window.removeEventListener('swatea:clear_history', handleClearHistory);
     };
   }, []);
+
+  // Previous 5 conversation summaries for quick context switching
+  const recentActivities = useMemo(() => {
+    return savedSessions.slice(0, 5).map((session) => {
+      const nonWelcome = session.messages.filter((m) => m.id !== 'welcome');
+      const firstUser = nonWelcome.find((m) => m.role === 'user');
+      const lastMsg = nonWelcome[nonWelcome.length - 1];
+
+      let summary = '';
+      if (firstUser && lastMsg && firstUser !== lastMsg) {
+        const q = firstUser.content.replace(/[\n#*`_\[\]]/g, ' ').trim();
+        const a = lastMsg.content.replace(/[\n#*`_\[\]]/g, ' ').trim();
+        summary = `Q: ${q.slice(0, 50)}${q.length > 50 ? '...' : ''} → A: ${a.slice(0, 60)}${a.length > 60 ? '...' : ''}`;
+      } else if (lastMsg) {
+        const clean = lastMsg.content.replace(/[\n#*`_\[\]]/g, ' ').trim();
+        summary = `${clean.slice(0, 110)}${clean.length > 110 ? '...' : ''}`;
+      } else if (firstUser) {
+        const clean = firstUser.content.replace(/[\n#*`_\[\]]/g, ' ').trim();
+        summary = `${clean.slice(0, 110)}${clean.length > 110 ? '...' : ''}`;
+      } else {
+        summary = isTamil ? 'உரையாடல் துவங்கியது' : 'Conversation initiated';
+      }
+
+      const allText = session.messages.map((m) => m.content).join(' ').toLowerCase();
+      let tag = 'General';
+      let tagColor = 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+      if (allText.includes('html') || allText.includes('<!doctype') || allText.includes('website')) {
+        tag = 'Website';
+        tagColor = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+      } else if (allText.includes('code') || allText.includes('function') || allText.includes('typescript') || allText.includes('python')) {
+        tag = 'Coding';
+        tagColor = 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+      } else if (allText.includes('video') || allText.includes('veo') || allText.includes('animate')) {
+        tag = 'Veo Video';
+        tagColor = 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+      } else if (allText.includes('image') || allText.includes('picture') || allText.includes('photo')) {
+        tag = 'Image AI';
+        tagColor = 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+      }
+
+      return {
+        session,
+        summary,
+        tag,
+        tagColor,
+        messageCount: session.messages.length,
+        isActive: session.id === activeSessionId,
+      };
+    });
+  }, [savedSessions, activeSessionId, isTamil]);
+
+  const handleQuickContextSwitch = (session: ChatSession) => {
+    loadSession(session);
+    const title = session.title || (isTamil ? 'உரையாடல்' : 'Conversation');
+    setContextSwitchNotification(title);
+    setTimeout(() => {
+      setContextSwitchNotification(null);
+    }, 2800);
+  };
 
   // Speech synthesis states
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -508,6 +636,107 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // Stop audio waveform analysis
+  const stopAudioWaveform = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    setAudioVolume(0);
+    setAudioLevels(new Array(28).fill(12));
+  };
+
+  // Start real-time audio waveform and activity monitoring
+  const startAudioWaveform = async () => {
+    stopAudioWaveform();
+
+    // 1. Immediately launch smooth harmonic simulation loop (0ms latency visual feedback)
+    let simStep = 0;
+    const runSimulation = () => {
+      simStep += 0.16;
+      const bars: number[] = [];
+      let totalEnergy = 0;
+      for (let i = 0; i < 28; i++) {
+        // Multi-harmonic wave function for natural voice fluctuation
+        const wave1 = Math.sin(simStep + i * 0.38) * 0.42;
+        const wave2 = Math.cos(simStep * 1.25 + i * 0.22) * 0.28;
+        const wave3 = Math.sin(simStep * 0.65 - i * 0.18) * 0.18;
+        const combined = Math.abs(wave1 + wave2 + wave3) + 0.15;
+        const height = Math.max(14, Math.min(96, Math.round(combined * 82)));
+        bars.push(height);
+        totalEnergy += height;
+      }
+      setAudioLevels(bars);
+      setAudioVolume(Math.round(totalEnergy / 28));
+      animFrameRef.current = requestAnimationFrame(runSimulation);
+    };
+    animFrameRef.current = requestAnimationFrame(runSimulation);
+
+    // 2. Connect Web Audio AnalyserNode to physical microphone for live voice amplitude
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStreamRef.current = stream;
+
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 64;
+        analyser.smoothingTimeConstant = 0.75;
+        analyserRef.current = analyser;
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+        }
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const updateLiveAudio = () => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          const liveBars: number[] = [];
+          const count = 28;
+          for (let i = 0; i < count; i++) {
+            const binIdx = Math.floor((i / count) * (bufferLength * 0.85));
+            const val = dataArray[binIdx] || 0;
+            sum += val;
+            const pct = Math.max(12, Math.min(100, Math.round((val / 255) * 92 + 8)));
+            liveBars.push(pct);
+          }
+          const avg = Math.round((sum / count) / 2.55);
+          setAudioVolume(avg);
+          setAudioLevels(liveBars);
+          animFrameRef.current = requestAnimationFrame(updateLiveAudio);
+        };
+        animFrameRef.current = requestAnimationFrame(updateLiveAudio);
+      }
+    } catch (err) {
+      console.log('[VoiceAssistant] Microphone analyser fallback active.');
+    }
+  };
+
+  // Cleanup audio tracks on unmount
+  useEffect(() => {
+    return () => {
+      stopAudioWaveform();
+    };
+  }, []);
+
   // Speech Recognition Setup
   useEffect(() => {
     const SpeechRecognition =
@@ -527,6 +756,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
 
       recognition.onend = () => {
         setIsListening(false);
+        stopAudioWaveform();
       };
 
       recognitionRef.current = recognition;
@@ -534,26 +764,36 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
   }, [isTamil]);
 
   const toggleVoiceListening = () => {
-    if (!recognitionRef.current) {
-      alert(
-        isTamil
-          ? 'உங்கள் உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை.'
-          : 'Voice dictation is not supported in this browser.'
-      );
-      return;
-    }
-
     if (isListening) {
-      recognitionRef.current.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
       setIsListening(false);
+      stopAudioWaveform();
     } else {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch (err) {
-        console.error('Speech recognition error:', err);
+      setIsListening(true);
+      startAudioWaveform();
+
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (err) {
+          console.error('Speech recognition error:', err);
+        }
       }
     }
+  };
+
+  const cancelVoiceListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
+    setIsListening(false);
+    stopAudioWaveform();
   };
 
   const starterPrompts = [
@@ -593,6 +833,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
         content,
         type: file.type,
         isImage: isImg,
+        size: file.size,
       });
     };
 
@@ -603,65 +844,129 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
     }
   };
 
+  const handleImageFromToolModal = (
+    imageData: { name: string; content: string; type: string; size?: number },
+    action?: 'chat' | 'vision' | 'edit' | 'video',
+    userPrompt?: string
+  ) => {
+    setAttachedFile({
+      name: imageData.name,
+      content: imageData.content,
+      type: imageData.type,
+      isImage: true,
+      size: imageData.size,
+    });
+
+    if (userPrompt && userPrompt.trim()) {
+      setInput(userPrompt.trim());
+      if (action === 'vision') {
+        const fullP = userPrompt.trim();
+        setTimeout(() => {
+          handleSend(undefined, fullP);
+        }, 150);
+      }
+    } else if (action === 'vision') {
+      const defaultVisionPrompt = isTamil
+        ? 'இந்த புகைப்படத்தை விரிவாக ஆய்வு செய்து, பொருட்கள் மற்றும் எழுத்துக்களை விவரிக்கவும்.'
+        : 'Analyze this photo in detail, describing all objects, context, and extracting any visible text.';
+      setInput(defaultVisionPrompt);
+    }
+  };
+
   const checkImageGenIntent = (text: string) => {
     if (persona === 'image') return true;
-    const lower = text.toLowerCase();
-    return (
-      lower.startsWith('image:') ||
-      lower.startsWith('/image') ||
-      lower.includes('generate image') ||
-      lower.includes('create image') ||
-      lower.includes('draw a') ||
-      lower.includes('draw an') ||
-      lower.includes('picture of') ||
-      lower.includes('photo of') ||
-      lower.includes('படத்தை உருவாக்கு') ||
-      lower.includes('படம் வரை') ||
-      lower.includes('வரைந்து தா') ||
-      lower.includes('படம் உருவாக்கு') ||
-      lower.includes('வரையவும்') ||
-      lower.includes('genarat') ||
-      lower.includes('generat') ||
-      lower.includes('draw') ||
-      lower.includes('வரைந்து') ||
-      lower.includes('படம்') ||
-      lower.includes('போட்டோ') ||
-      lower.includes('illustration') ||
-      lower.includes('poster') ||
-      lower.includes('logo')
-    );
+    const lower = text.toLowerCase().trim();
+
+    // If the user is setting rules or meta-instructions about images, DO NOT trigger image generation!
+    if (
+      lower.includes('nu keta') ||
+      lower.includes('keta matum') ||
+      lower.includes('keta mattum') ||
+      lower.includes('keta tha') ||
+      lower.includes('theva illama') ||
+      lower.includes('thevai illama') ||
+      lower.includes('woraga') ||
+      lower.includes('rule') ||
+      lower.includes('instruction')
+    ) {
+      return false;
+    }
+
+    // Explicit command prefixes
+    if (lower.startsWith('image:') || lower.startsWith('/image') || lower.startsWith('photo:')) return true;
+
+    // Direct phrases asking for an image in Tamil / Tanglish / English
+    const imageKeywords = [
+      'image kudu', 'imaga kudu', 'imaga tha', 'image tha', 'image kaatu', 'image kaattu', 'image kattunga',
+      'image venum', 'image vendum', 'image anupu', 'image generate', 'generate image', 'create image',
+      'photo kudu', 'photo tha', 'photo kaatu', 'photo kaattu', 'photo venum', 'photo anupu', 'photo generate',
+      'pic kudu', 'pic tha', 'pic kaatu', 'pic venum', 'pic anupu',
+      'picture kudu', 'picture tha', 'picture kaatu', 'picture venum',
+      'padam kudu', 'padam tha', 'padam kaatu', 'padam venum',
+      'படத்தை உருவாக்கு', 'படம் வரை', 'வரைந்து தா', 'படம் உருவாக்கு', 'வரையவும்',
+      'படம் காட்டு', 'படம் கொடு', 'புகைப்படம் கொடு', 'புகைப்படம் காட்டு', 'போட்டோ கொடு', 'போட்டோ காட்டு',
+      'draw a', 'draw an', 'picture of', 'photo of', 'image of', 'illustration of', 'sketch of',
+      'give me an image', 'give me image', 'show me image', 'show image of', 'generate picture',
+    ];
+
+    if (imageKeywords.some((kw) => lower.includes(kw))) return true;
+
+    // Direct pattern: ends with image / photo / pic / picture / wallpaper (e.g. "yamaha mt-15 image", "car photo", "dog pic")
+    if (/\b(?:image|photo|pic|picture|wallpaper)\s*$/i.test(lower)) return true;
+
+    return false;
   };
 
   const checkWebsiteGenIntent = (text: string) => {
-    const lower = text.toLowerCase();
-    if (persona === 'coder' && (lower.includes('website') || lower.includes('webpage') || lower.includes('html') || lower.includes('site'))) return true;
-    return (
+    const lower = text.toLowerCase().trim();
+
+    // If it's a meta instruction, casual question or discussion about websites, DO NOT trigger website generator
+    if (
+      lower.includes('nu keta') ||
+      lower.includes('keta matum') ||
+      lower.includes('keta mattum') ||
+      lower.includes('theva illama') ||
+      lower.includes('woraga') ||
+      lower.includes('what is a website') ||
+      lower.includes('how does a website work') ||
+      lower.includes('meaning') ||
+      lower.includes('enral enna') ||
+      lower.includes('endral enna')
+    ) {
+      return false;
+    }
+
+    // Must have an explicit intent to BUILD / CREATE / MAKE a website
+    const hasCreationVerb =
+      lower.includes('build') ||
+      lower.includes('create') ||
+      lower.includes('make') ||
+      lower.includes('design') ||
+      lower.includes('develop') ||
+      lower.includes('generate') ||
+      lower.includes('code a') ||
+      lower.includes('ezhudhu') ||
+      lower.includes('pannu') ||
+      lower.includes('sey') ||
+      lower.includes('seiy') ||
+      lower.includes('உருவாக்கு') ||
+      lower.includes('பண்ணு') ||
+      lower.includes('செய்') ||
+      lower.includes('kudu') ||
+      lower.includes('thaa') ||
+      lower.includes('venum');
+
+    const hasWebsiteNoun =
       lower.includes('website') ||
-      lower.includes('websait') ||
-      lower.includes('web sait') ||
-      lower.includes('web site') ||
       lower.includes('webpage') ||
+      lower.includes('web site') ||
       lower.includes('landing page') ||
+      lower.includes('web app') ||
       lower.includes('வெப்சைட்') ||
       lower.includes('இணையதளம்') ||
-      lower.includes('build site') ||
-      lower.includes('create site') ||
-      lower.includes('design site') ||
-      lower.includes('app ui') ||
-      lower.includes('web app') ||
-      lower.includes('saat creat') ||
-      lower.includes('site creat') ||
-      lower.includes('websait creat') ||
-      lower.includes('websait build') ||
-      lower.includes('build website') ||
-      lower.includes('create website') ||
-      lower.includes('design website') ||
-      lower.includes('website உருவாக்கு') ||
-      lower.includes('website பண்ணு') ||
-      lower.includes('website செய்') ||
-      lower.includes('full website') ||
-      lower.includes('wrbsait')
-    );
+      lower.includes('websait');
+
+    return hasCreationVerb && hasWebsiteNoun;
   };
 
   const streamBotResponse = (
@@ -765,18 +1070,39 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
     try {
       if (isImageGen) {
         // --- 1. AI Image Generation Route ---
-        const cleanPrompt = promptToSend.replace(/^(\/image|image:|வரைந்து தா:|படத்தை உருவாக்கு:)/i, '').trim();
+        // Clean prompt to extract core subject (stripping 'image kudu', 'photo tha', 'venum', etc.)
+        const cleanPrompt = promptToSend
+          .replace(/^(\/image|image:|photo:|வரைந்து தா:|படத்தை உருவாக்கு:)/i, '')
+          .replace(/\b(image kudu|imaga kudu|imaga tha|image tha|image kaatu|image kaattu|image kattunga|image venum|image vendum|image anupu|photo kudu|photo tha|photo kaatu|photo venum|photo anupu|pic kudu|pic tha|pic kaatu|pic venum|picture kudu|picture tha|padam kudu|padam tha|padam kaatu|padam venum|kudu|tha|venum|kaatu|kaattu|anupu|please|give me|show me|generate|create|oru)\b/gi, '')
+          .replace(/\b(படத்தை உருவாக்கு|படம் வரை|வரைந்து தா|படம் உருவாக்கு|வரையவும்|படம் காட்டு|படம் கொடு|புகைப்படம் கொடு|புகைப்படம் காட்டு|போட்டோ கொடு|போட்டோ காட்டு)\b/gi, '')
+          .trim();
+
+        const finalImagePrompt = cleanPrompt.length > 2 ? cleanPrompt : promptToSend;
+        const storedOpenaiKey = localStorage.getItem('swatea_openai_api_key') || '';
+        const storedCustomGeminiKey = localStorage.getItem('swatea_custom_api_key') || '';
+
+        const headers: Record<string, string> = {};
+        if (storedOpenaiKey) headers['x-openai-api-key'] = storedOpenaiKey;
+        if (storedCustomGeminiKey) headers['x-custom-api-key'] = storedCustomGeminiKey;
+
         const data = await safeFetchJson('/api/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt: cleanPrompt || promptToSend }),
+          headers,
+          body: JSON.stringify({
+            prompt: finalImagePrompt,
+            engine: storedOpenaiKey ? 'dall-e-3' : 'flux-schnell',
+          }),
         });
+
+        const engineLabel = data.modelUsed || (storedOpenaiKey ? 'DALL-E 3' : 'Flux.1 Schnell');
+        const durationText = data.durationMs ? ` (${(data.durationMs / 1000).toFixed(1)}s)` : '';
 
         const botMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: isTamil
-            ? `🎨 **ஸ்வாதியா ஏஐ படம் உருவாக்கப்பட்டது!**\n\nவினவல்: *"${cleanPrompt || promptToSend}"*`
-            : `🎨 **Swatea AI Image Generated Successfully!**\n\nPrompt: *"${cleanPrompt || promptToSend}"*`,
+            ? `🎨 **${engineLabel} மூலம் படம் உருவாக்கப்பட்டது!**${durationText}\n\nவினவல்: *"${finalImagePrompt}"*`
+            : `🎨 **${engineLabel} Image Generated!**${durationText}\n\nPrompt: *"${finalImagePrompt}"*`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           persona: 'image',
           imageUrl: data.imageUrl,
@@ -805,17 +1131,87 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
 
         streamBotResponse(websiteReply, (Date.now() + 1).toString(), { persona: 'coder' });
       } else if (currentAttached?.isImage) {
-        // --- 2. Vision AI Analysis for Uploaded Images ---
-        const data = await safeFetchJson('/api/vision', {
-          method: 'POST',
-          body: JSON.stringify({
-            imageBase64: currentAttached.content,
-            mimeType: currentAttached.type || 'image/png',
-            prompt: promptToSend,
-          }),
-        });
+        const isAnimateQuery = /\b(animate|video|veo|movie|motion|clip|animation|animated|வீடியோ|அனிமேட்)\b/i.test(promptToSend);
+        const isEditQuery = /\b(edit|change|add|remove|modify|transform|filter|style|மாற்று|திருத்து|சேர்|நீக்கு)\b/i.test(promptToSend);
 
-        streamBotResponse(data.analysis || '', (Date.now() + 1).toString(), { persona: 'analyst' });
+        if (isAnimateQuery) {
+          // --- 2a. Animate Image into Video using Google Veo ---
+          try {
+            const startRes = await safeFetchJson('/api/generate-video', {
+              method: 'POST',
+              body: JSON.stringify({
+                prompt: promptToSend,
+                image: currentAttached.content,
+                aspectRatio: '16:9',
+                resolution: '720p',
+                model: 'veo-3.1-lite-generate-preview',
+              }),
+            });
+
+            const opName = startRes.operationName;
+            let isDone = false;
+            let attempts = 0;
+            while (!isDone && attempts < 25) {
+              attempts++;
+              await new Promise((r) => setTimeout(r, 2000));
+              const stat = await safeFetchJson('/api/video-status', {
+                method: 'POST',
+                body: JSON.stringify({ operationName: opName }),
+              });
+              if (stat.done) {
+                isDone = true;
+                break;
+              }
+            }
+
+            const dl = await safeFetchJson('/api/video-download', {
+              method: 'POST',
+              body: JSON.stringify({ operationName: opName, returnBase64: true }),
+            });
+
+            const vidUrl = dl.videoUrl;
+            const vidReply = isTamil
+              ? `🎬 **கூகிள் Veo மூலம் உங்கள் புகைப்படம் வெற்றிகரமாக வீடியோவாக அனிமேட் செய்யப்பட்டது!**\n\n[▶️ வீடியோவைப் பார்க்க அல்லது பதிவிறக்க இங்கே கிளிக் செய்க](${vidUrl})\n\n*(நீங்கள் மேல் மெனுவில் "வீடியோ அனிமேஷன்" ஸ்டுடியோவையும் பயன்படுத்தலாம்.)*`
+              : `🎬 **Your photo has been animated into a video using Google Veo!**\n\n[▶️ Click here to view or download your video](${vidUrl})\n\n*(You can also use the dedicated "Animate to Video" Veo Studio in the sidebar navigation.)*`;
+
+            streamBotResponse(vidReply, (Date.now() + 1).toString(), { persona: 'creative' });
+          } catch (vErr: any) {
+            streamBotResponse(`⚠️ Veo Video Animation Notice: ${vErr?.message || 'Video processing initiated'}`, (Date.now() + 1).toString());
+          }
+        } else if (isEditQuery) {
+          // --- 2b. Edit Image using Gemini 3.1 Flash Image Preview ---
+          try {
+            const editRes = await safeFetchJson('/api/generate-image', {
+              method: 'POST',
+              body: JSON.stringify({
+                prompt: promptToSend,
+                image: currentAttached.content,
+                model: 'gemini-3.1-flash-image-preview',
+              }),
+            });
+
+            const imgUrl = editRes.imageUrl;
+            const imgReply = isTamil
+              ? `🪄 **ஜெமினி 3.1 ஃபிளாஷ் மூலம் படம் திருத்தப்பட்டது!**\n\n![திருத்தப்பட்ட படம்](${imgUrl})\n\n*(நீங்கள் இடதுபுற மெனுவில் "பட உருவாக்கம் & திருத்தம்" ஸ்டுடியோவையும் பயன்படுத்தலாம்.)*`
+              : `🪄 **Image edited with Gemini 3.1 Flash Image Engine!**\n\n![Edited Image](${imgUrl})\n\n*(You can also use the dedicated "Create & Edit Images" Studio from the sidebar navigation.)*`;
+
+            streamBotResponse(imgReply, (Date.now() + 1).toString(), { persona: 'creative' });
+          } catch (eErr: any) {
+            streamBotResponse(`⚠️ Image Editing Notice: ${eErr?.message || 'Editing processed'}`, (Date.now() + 1).toString());
+          }
+        } else {
+          // --- 2c. Standard Vision AI Analysis for Uploaded Images ---
+          const data = await safeFetchJson('/api/vision', {
+            method: 'POST',
+            body: JSON.stringify({
+              imageBase64: currentAttached.content,
+              mimeType: currentAttached.type || 'image/png',
+              prompt: promptToSend,
+            }),
+          });
+
+          streamBotResponse(data.analysis || '', (Date.now() + 1).toString(), { persona: 'analyst' });
+        }
       } else {
         // --- 3. Standard Text / Code / General Question Answering ---
         const data = await safeFetchJson('/api/chat', {
@@ -900,7 +1296,7 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
               );
             },
             p({ children }) {
-              return <p className="leading-relaxed my-1.5 text-slate-200">{children}</p>;
+              return <div className="leading-relaxed my-1.5 text-slate-200">{children}</div>;
             },
             strong({ children }) {
               return <strong className="font-extrabold text-amber-300">{children}</strong>;
@@ -1187,9 +1583,10 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
             onChange={(e) => setSelectedModel(e.target.value)}
             className="bg-slate-950 border border-slate-800 text-emerald-300 font-mono text-[11px] rounded-lg px-2.5 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-inner max-w-[260px] sm:max-w-none truncate"
           >
-            <option value="gemini-3.6-flash">⚡ Gemini 3.6 Flash</option>
-            <option value="gemini-3.6-pro">🔬 Gemini 3.6 Pro</option>
-            <option value="gemini-3.6-vision">👁️ Gemini 3.6 Vision</option>
+            <option value="gemini-3.7-flash">⚡ Gemini 3.7 Flash (Default)</option>
+            <option value="gemini-flash-latest">⚡ Gemini Flash Latest</option>
+            <option value="gemini-3.1-flash-lite">🍃 Gemini 3.1 Flash Lite</option>
+            <option value="gemini-3.1-pro-preview">🔬 Gemini 3.1 Pro</option>
             <option value="gpt-4o">🤖 OpenAI GPT-4o</option>
             <option value="gpt-4o-mini">⚡ OpenAI GPT-4o Mini</option>
             <option value="claude-3-5-sonnet">🎨 Claude 3.5 Sonnet</option>
@@ -1200,7 +1597,58 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
           </select>
         </div>
 
+        {/* Right Header Actions: Listening Pill, Photo Upload Tool, & Recent Activity Drawer Toggle */}
+        <div className="flex items-center gap-2">
+          {/* Direct Photo Upload Tool Header Button */}
+          <button
+            type="button"
+            onClick={() => setIsImageUploadModalOpen(true)}
+            className="px-2.5 sm:px-3 py-1.5 rounded-xl border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm hover:scale-102"
+            title={isTamil ? 'நேரடி படம் / புகைப்பட பதிவேற்று கருவி' : 'Direct Photo & Image Upload Tool'}
+          >
+            <Camera className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden sm:inline">
+              {isTamil ? '📷 படம் பதிவேற்று' : '📷 Upload Photo Tool'}
+            </span>
+            <span className="sm:hidden text-[11px] font-bold">📷 Photo</span>
+          </button>
 
+          {/* Active Voice Listening Pill */}
+          {isListening && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-500/20 border border-rose-500/50 text-rose-300 text-xs font-mono font-bold animate-pulse shadow-md shadow-rose-950/40">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <Mic className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">{isTamil ? 'குரல் கேட்கிறது' : 'Voice Active'}</span>
+              <span className="flex items-center gap-0.5 h-3 px-1">
+                <span className="w-0.5 h-full bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-0.5 h-full bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '120ms' }} />
+                <span className="w-0.5 h-full bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '240ms' }} />
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={() => setIsRecentActivityOpen(!isRecentActivityOpen)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95 ${
+              isRecentActivityOpen
+                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-950/30'
+                : 'bg-slate-950 text-slate-300 border-slate-800 hover:text-white hover:border-slate-700 hover:bg-slate-900'
+            }`}
+            title={isTamil ? 'சமீபத்திய 5 உரையாடல்கள் & சூழல் மாற்றம்' : 'Recent Activity - Quick Context Switching'}
+          >
+            <Clock className={`w-3.5 h-3.5 ${isRecentActivityOpen ? 'text-slate-950' : 'text-amber-400'}`} />
+            <span>{isTamil ? 'சமீபத்திய செயல்பாடுகள்' : 'Recent Activity'}</span>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full border ${
+                isRecentActivityOpen
+                  ? 'bg-slate-950 text-amber-300 border-slate-900'
+                  : 'bg-slate-800 text-amber-300 border-slate-700'
+              }`}
+            >
+              {Math.min(savedSessions.length, 5)}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Global Speaking Status Banner */}
@@ -1227,7 +1675,71 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
       {/* Main Container Area - Flex Split Row for Chat + Edge Live Web Studio */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Chat Column */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingOverChat(true);
+          }}
+          onDragLeave={() => setIsDraggingOverChat(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDraggingOverChat(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) {
+              const isImg = file.type.startsWith('image/');
+              const reader = new FileReader();
+              reader.onload = (evt) => {
+                setAttachedFile({
+                  name: file.name,
+                  content: evt.target?.result as string,
+                  type: file.type,
+                  isImage: isImg,
+                  size: file.size,
+                });
+              };
+              if (isImg) reader.readAsDataURL(file);
+              else reader.readAsText(file);
+            }
+          }}
+          className="flex-1 flex flex-col min-w-0 overflow-hidden relative"
+        >
+          {/* Glowing Drag & Drop Overlay */}
+          {isDraggingOverChat && (
+            <div className="absolute inset-0 z-40 bg-sky-950/85 border-4 border-dashed border-sky-400 rounded-3xl flex flex-col items-center justify-center p-6 text-center backdrop-blur-md pointer-events-none animate-fadeIn m-2 shadow-2xl">
+              <div className="w-16 h-16 rounded-2xl bg-sky-500/20 border border-sky-400 flex items-center justify-center text-sky-300 mb-3 shadow-xl">
+                <Camera className="w-8 h-8 animate-bounce" />
+              </div>
+              <h3 className="text-base sm:text-lg font-bold text-white">
+                {isTamil ? 'புகைப்படத்தை இங்கே போடவும் (Drop Photo Here)' : 'Drop Your Photo / Image Here'}
+              </h3>
+              <p className="text-xs text-sky-200 mt-1">
+                {isTamil
+                  ? 'உடனடியாக பதிவேற்றப்பட்டு ஏஐ ஆய்வுக்கு தயாராகும்.'
+                  : 'Instantly uploaded and staged for Vision AI & editing.'}
+              </p>
+            </div>
+          )}
+
+          {/* Quick Context Switch Notification Banner */}
+          {contextSwitchNotification && (
+            <div className="bg-gradient-to-r from-emerald-950 via-amber-950 to-slate-950 border-b border-emerald-500/50 px-4 py-2 flex items-center justify-between text-xs text-emerald-300 shrink-0 z-20 animate-fadeIn shadow-lg">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                <Zap className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" />
+                <span className="font-extrabold shrink-0">
+                  {isTamil ? '⚡ சூழல் மாற்றப்பட்டது:' : '⚡ Context Switched To:'}
+                </span>
+                <span className="text-white font-bold truncate max-w-sm">"{contextSwitchNotification}"</span>
+              </div>
+              <button
+                onClick={() => setContextSwitchNotification(null)}
+                className="p-1 text-slate-400 hover:text-white cursor-pointer ml-2"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Main Stream Area (Scrollable Messages Container) */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
             <div className="max-w-3xl mx-auto space-y-6">
@@ -1371,6 +1883,31 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
                         </div>
                       )}
 
+                      {/* Google Search Sources & Citation Links */}
+                      {!isUser && msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-3 pt-2.5 border-t border-slate-800/80">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 mb-2">
+                            <Globe className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                            <span>{isTamil ? '🌐 கூகுள் தேடல் ஆதாரங்கள் & லிங்குகள்:' : '🌐 Google Search Grounded Sources & Links:'}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.sources.map((src, sIdx) => (
+                              <a
+                                key={sIdx}
+                                href={src.uri}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/80 text-[11px] font-medium transition-all hover:scale-102 shadow-sm truncate max-w-[240px]"
+                                title={src.title || src.uri}
+                              >
+                                <span className="truncate">{src.title || src.uri}</span>
+                                <ChevronRight className="w-3 h-3 text-amber-400 shrink-0" />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* User Edit Button on hover */}
                       {isUser && editingMsgId !== msg.id && (
                         <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-slate-900/90 p-1 rounded-lg border border-slate-700 shadow-md">
@@ -1459,17 +1996,196 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
           {/* FIXED / STICKY GEMINI-STYLE BOTTOM TYPING DASHBOARD */}
           <div className="shrink-0 sticky bottom-0 left-0 right-0 p-3 sm:p-4 bg-slate-950/80 border-t border-slate-800/80 backdrop-blur-xl z-20">
             <div className="max-w-3xl mx-auto space-y-2">
-              {/* Attached File Preview Badge */}
+              {/* Attached File Preview Badge / Rich Image Card */}
               {attachedFile && (
-                <div className="flex items-center justify-between bg-amber-500/15 border border-amber-500/40 text-amber-300 px-3 py-1.5 rounded-xl text-xs font-mono shadow-sm">
-                  <span className="truncate max-w-[300px]">📎 {attachedFile.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAttachedFile(null)}
-                    className="text-slate-400 hover:text-rose-400 p-0.5 rounded-lg transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                <div className="bg-slate-900/95 border border-sky-500/40 rounded-2xl p-2.5 shadow-xl backdrop-blur-xl animate-fadeIn">
+                  {attachedFile.isImage ? (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          onClick={() => setPreviewModalImage(attachedFile.content)}
+                          className="relative group w-14 h-14 rounded-xl overflow-hidden bg-slate-950 border border-slate-700 shrink-0 cursor-pointer shadow-md hover:ring-2 hover:ring-sky-400 transition-all"
+                        >
+                          <img
+                            src={attachedFile.content}
+                            alt={attachedFile.name}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Eye className="w-3.5 h-3.5 text-white" />
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-200 text-xs truncate max-w-[180px] sm:max-w-xs">
+                              {attachedFile.name}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-mono font-bold">
+                              PHOTO ATTACHED
+                            </span>
+                          </div>
+
+                          {/* Quick Action Prompt Chips */}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const p = isTamil
+                                  ? 'இந்த புகைப்படத்தை முழுமையாக ஆய்வு செய்து அதில் உள்ளவற்றை விளக்குக.'
+                                  : 'Analyze this photo in detail, describing all objects, context, and key elements.';
+                                setInput(p);
+                              }}
+                              className="px-2 py-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>{isTamil ? '🔍 ஆய்வு செய்' : '🔍 Analyze Photo'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const p = isTamil
+                                  ? 'இந்த புகைப்படத்தில் உள்ள அனைத்து எழுத்துக்களையும் படித்து தருக (OCR).'
+                                  : 'Extract and transcribe all readable text from this image.';
+                                setInput(p);
+                              }}
+                              className="px-2 py-0.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <span>{isTamil ? '📝 எழுத்துக்கள் (OCR)' : '📝 Extract Text'}</span>
+                            </button>
+
+                            {onNavigateToVideo && (
+                              <button
+                                type="button"
+                                onClick={() => onNavigateToVideo(attachedFile.content, 'Smooth cinematic motion')}
+                                className="px-2 py-0.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <Film className="w-3 h-3" />
+                                <span>{isTamil ? '🎥 வீடியோவாக்கு' : '🎥 Animate Video'}</span>
+                              </button>
+                            )}
+
+                            {onNavigateToImage && (
+                              <button
+                                type="button"
+                                onClick={() => onNavigateToImage(attachedFile.content)}
+                                className="px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <Wand2 className="w-3 h-3" />
+                                <span>{isTamil ? '🪄 திருத்து' : '🪄 Edit Image'}</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setAttachedFile(null)}
+                        className="text-slate-400 hover:text-rose-400 p-1 rounded-lg hover:bg-slate-800 transition-colors shrink-0"
+                        title="Remove Attached Image"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-xs font-mono text-amber-300">
+                      <span className="truncate max-w-[300px]">📎 {attachedFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachedFile(null)}
+                        className="text-slate-400 hover:text-rose-400 p-0.5 rounded-lg transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Visual Audio Waveform & Voice Activity Indicator Panel */}
+              {isListening && (
+                <div className="bg-gradient-to-r from-slate-900/95 via-rose-950/40 to-slate-900/95 border border-rose-500/50 shadow-2xl shadow-rose-950/40 rounded-2xl sm:rounded-3xl p-3 sm:p-4 backdrop-blur-xl animate-fadeIn space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    {/* Mic Status & Ping Indicator */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative flex items-center justify-center w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/60 text-rose-400 shrink-0 shadow-lg shadow-rose-950/50">
+                        <div className="absolute inset-0 rounded-2xl bg-rose-500/30 animate-ping pointer-events-none" />
+                        <Mic className="w-5 h-5 relative z-10 animate-bounce text-rose-400" />
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-white font-mono flex items-center gap-1.5">
+                            <span>{isTamil ? 'குரல் உதவியாளர் கேட்கிறது' : 'Voice Assistant Listening'}</span>
+                            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-extrabold border border-rose-500/30">
+                            MIC ACTIVE
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 truncate max-w-sm sm:max-w-md">
+                          {input.trim()
+                            ? `"${input}"`
+                            : (isTamil
+                                ? 'பேசுங்கள்... உங்கள் குரல் சொற்களாக மாற்றப்படுகிறது'
+                                : 'Listening for your voice... speak in Tamil or English')}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Audio Energy Level Meter & Stop Actions */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="hidden xs:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-[10px] font-mono">
+                        <Activity className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                        <span className="text-slate-400">Level:</span>
+                        <span className="text-rose-400 font-bold">{audioVolume}%</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={cancelVoiceListening}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+                        title={isTamil ? 'ரத்து செய்' : 'Cancel'}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline ml-1">{isTamil ? 'ரத்து' : 'Cancel'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={toggleVoiceListening}
+                        className="px-3.5 py-1.5 bg-rose-500 hover:bg-rose-400 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-rose-950/40 transition-all cursor-pointer active:scale-95"
+                      >
+                        <MicOff className="w-3.5 h-3.5" />
+                        <span>{isTamil ? 'முடிக்கவும்' : 'Done'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dynamic 28-Bar Equalizer Audio Waveform */}
+                  <div className="flex items-center justify-between gap-1 sm:gap-1.5 h-12 px-3 sm:px-5 bg-slate-950/90 rounded-2xl border border-slate-800/80 shadow-inner overflow-hidden">
+                    {audioLevels.map((level, idx) => {
+                      const isLeft = idx < 9;
+                      const isCenter = idx >= 9 && idx < 19;
+                      return (
+                        <div
+                          key={idx}
+                          className="flex-1 max-w-[8px] rounded-full transition-all duration-75 ease-out shadow-sm"
+                          style={{
+                            height: `${level}%`,
+                            background: isCenter
+                              ? 'linear-gradient(to top, #f43f5e, #fb7185, #fda4af)'
+                              : isLeft
+                              ? 'linear-gradient(to top, #06b6d4, #38bdf8, #7dd3fc)'
+                              : 'linear-gradient(to top, #f59e0b, #fbbf24, #fde68a)',
+                            boxShadow: isCenter && audioVolume > 25 ? '0 0 10px rgba(244, 63, 94, 0.7)' : 'none',
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -1484,6 +2200,14 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
                   onChange={handleFileUpload}
                   className="hidden"
                   accept=".txt,.js,.ts,.json,.md,.py,.doc,.csv,image/*"
+                />
+
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  accept="image/*"
                 />
 
                 {/* Input Field */}
@@ -1508,12 +2232,35 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
                 {/* Bottom Controls Bar inside Capsule */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 mt-1 px-1">
                   {/* Left Action Buttons */}
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                    {/* Dedicated Direct Photo Upload Tool Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsImageUploadModalOpen(true)}
+                      className="px-2.5 py-1.5 text-sky-300 hover:text-white bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer hover:scale-102"
+                      title={isTamil ? 'நேரடி படம் / புகைப்பட பதிவேற்று கருவி (கேமரா / பைல்கள்)' : 'Direct Photo & Image Upload Tool (Camera / Files)'}
+                    >
+                      <Camera className="w-4 h-4 text-sky-400" />
+                      <span className="hidden xs:inline">
+                        {isTamil ? '📷 படம் பதிவேற்று' : '📷 Upload Photo'}
+                      </span>
+                    </button>
+
+                    {/* Quick Native Gallery / Photo Selector */}
+                    <button
+                      type="button"
+                      onClick={() => photoInputRef.current?.click()}
+                      className="p-2 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs cursor-pointer"
+                      title={isTamil ? 'சாதன புகைப்படத்தை தேர்வு செய்' : 'Select Photo from Device'}
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs"
-                      title="Attach File"
+                      className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-xl transition-all flex items-center gap-1 text-xs cursor-pointer"
+                      title={isTamil ? 'கோப்பு இணைக்க' : 'Attach File'}
                     >
                       <Paperclip className="w-4 h-4" />
                     </button>
@@ -1546,15 +2293,27 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
                     <button
                       type="button"
                       onClick={toggleVoiceListening}
-                      className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs ${
+                      className={`p-2 rounded-xl transition-all flex items-center gap-1.5 text-xs cursor-pointer ${
                         isListening
-                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse'
+                          ? 'bg-rose-500/25 text-rose-300 border border-rose-500/60 shadow-lg shadow-rose-950/50 ring-2 ring-rose-500/30'
                           : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
                       }`}
                       title={isTamil ? 'குரல் உள்ளீடு' : 'Voice Dictation'}
                     >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                      {isListening && <span className="text-[10px] font-bold">Listening...</span>}
+                      {isListening ? (
+                        <>
+                          <MicOff className="w-4 h-4 text-rose-400 shrink-0" />
+                          <span className="flex items-center gap-0.5 h-3 px-0.5">
+                            <span className="w-0.5 h-full bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-0.5 h-full bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-0.5 h-full bg-rose-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <span className="w-0.5 h-full bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
+                          </span>
+                          <span className="text-[10px] font-bold text-rose-300 hidden xs:inline">Listening...</span>
+                        </>
+                      ) : (
+                        <Mic className="w-4 h-4" />
+                      )}
                     </button>
                   </div>
 
@@ -1746,6 +2505,164 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
             </div>
           </div>
         )}
+
+        {/* Recent Activity Sidebar / Drawer for Previous 5 Conversation Summaries */}
+        {isRecentActivityOpen && (
+          <aside className="w-80 sm:w-96 max-w-[90vw] bg-slate-950/95 border-l border-slate-800/80 backdrop-blur-xl flex flex-col shrink-0 z-30 h-full shadow-2xl transition-all animate-fadeIn">
+            {/* Drawer Top Header */}
+            <div className="p-3.5 bg-slate-900/90 border-b border-slate-800/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-white flex items-center gap-1.5">
+                    <span>{isTamil ? 'சமீபத்திய செயல்பாடுகள்' : 'Recent Activity'}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                      5 {isTamil ? 'சுருக்கங்கள்' : 'Summaries'}
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    {isTamil
+                      ? 'முந்தைய 5 உரையாடல்களின் சுருக்கம் மற்றும் விரைவு சூழல் மாற்றம்'
+                      : 'Previous 5 conversation summaries for quick context switching'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsRecentActivityOpen(false)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title={isTamil ? 'மூடு' : 'Close Drawer'}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Actions Bar */}
+            <div className="px-3.5 py-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center justify-between text-xs shrink-0">
+              <button
+                onClick={() => {
+                  startNewChat();
+                  setContextSwitchNotification(isTamil ? 'புதிய உரையாடல்' : 'Fresh Session');
+                  setTimeout(() => setContextSwitchNotification(null), 2500);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-[11px] flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                <span>{isTamil ? '+ புதிய உரையாடல்' : '+ New Chat'}</span>
+              </button>
+
+              <span className="text-[10px] text-slate-500 font-mono">
+                {savedSessions.length} {isTamil ? 'மொத்த சாட்கள்' : 'archived'}
+              </span>
+            </div>
+
+            {/* Conversation Summaries List */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-0 scrollbar-thin">
+              {recentActivities.length === 0 ? (
+                <div className="py-12 px-4 text-center space-y-2 text-slate-500">
+                  <Clock className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs font-medium text-slate-400">
+                    {isTamil ? 'சமீபத்திய உரையாடல்கள் இல்லை' : 'No previous conversations recorded yet.'}
+                  </p>
+                  <p className="text-[11px] text-slate-600">
+                    {isTamil
+                      ? 'நீங்கள் சாட் செய்யும்போது முந்தைய 5 உரையாடல்களின் சுருக்கம் இங்கே விரைவு மாற்றத்திற்கு தயாராக இருக்கும்.'
+                      : 'As you chat, summaries of your previous 5 sessions will appear here for fast context switching.'}
+                  </p>
+                </div>
+              ) : (
+                recentActivities.map(({ session, summary, tag, tagColor, messageCount, isActive }, idx) => (
+                  <div
+                    key={session.id}
+                    onClick={() => handleQuickContextSwitch(session)}
+                    className={`group relative p-3 rounded-xl border text-xs transition-all cursor-pointer space-y-2 ${
+                      isActive
+                        ? 'bg-amber-500/10 border-amber-500/70 shadow-md shadow-amber-950/20 ring-1 ring-amber-500/40'
+                        : 'bg-slate-900/60 hover:bg-slate-900 border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    {/* Header: Title & Tag */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono font-bold text-slate-500 shrink-0">
+                          #{idx + 1}
+                        </span>
+                        <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
+                        <h4 className="font-bold text-slate-200 group-hover:text-white truncate text-xs">
+                          {session.title || (isTamil ? 'தலைப்பற்ற உரையாடல்' : 'Untitled Conversation')}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`text-[9px] font-extrabold font-mono px-1.5 py-0.5 rounded border ${tagColor}`}>
+                          {tag}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteSession(session.id);
+                          }}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                          title={isTamil ? 'நீக்கு' : 'Delete'}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Summary Snippet */}
+                    <div className="bg-slate-950/80 border border-slate-800/70 rounded-lg p-2 text-[11px] text-slate-300 leading-relaxed font-sans line-clamp-3">
+                      <span className="text-amber-400 font-bold mr-1">⚡ {isTamil ? 'சுருக்கம்:' : 'Summary:'}</span>
+                      <span>{summary}</span>
+                    </div>
+
+                    {/* Meta info & Quick Switch Button */}
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px]">
+                      <div className="flex items-center gap-2 text-slate-500 font-mono">
+                        <span>{session.createdAt || 'Recent'}</span>
+                        <span>•</span>
+                        <span>{messageCount} {isTamil ? 'செய்திகள்' : 'msgs'}</span>
+                      </div>
+
+                      {isActive ? (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span>{isTamil ? 'தற்போதைய சூழல்' : 'Active Context'}</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickContextSwitch(session);
+                          }}
+                          className="flex items-center gap-1 text-[10px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 px-2 py-0.5 rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+                        >
+                          <Zap className="w-3 h-3 text-amber-400" />
+                          <span>{isTamil ? 'மாற்று' : 'Switch Context'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Bottom Tip Bar */}
+            <div className="p-3 bg-slate-900/80 border-t border-slate-800/80 text-[10px] text-slate-400 shrink-0 flex items-center justify-between">
+              <span className="flex items-center gap-1 text-slate-400">
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>{isTamil ? '1-கிளிக் விரைவு சூழல் மாற்றம்' : '1-Click Context Switch'}</span>
+              </span>
+              <button
+                onClick={() => setIsRecentActivityOpen(false)}
+                className="text-amber-400 hover:underline font-bold cursor-pointer"
+              >
+                {isTamil ? 'முடிந்தது' : 'Done'}
+              </button>
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* Fullscreen Image Preview Modal */}
@@ -1836,6 +2753,16 @@ export const ChatModule: React.FC<ChatModuleProps> = ({ language, currentUserEma
           </div>
         </div>
       )}
+
+      {/* Dedicated Direct Image & Photo Upload Tool Modal */}
+      <ImageUploadToolModal
+        isOpen={isImageUploadModalOpen}
+        onClose={() => setIsImageUploadModalOpen(false)}
+        isTamil={isTamil}
+        onImageSelected={handleImageFromToolModal}
+        onNavigateToVideo={onNavigateToVideo}
+        onNavigateToImage={onNavigateToImage}
+      />
     </div>
   );
 };

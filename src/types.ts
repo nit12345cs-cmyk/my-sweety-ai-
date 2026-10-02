@@ -1,7 +1,10 @@
 export type ModuleType =
   | 'chat'
+  | 'image'
+  | 'video'
   | 'website'
   | 'voice'
+  | 'workflow'
   | 'admin';
 
 export type LanguageCode = 'ta' | 'en' | 'es' | 'ja' | 'de';
@@ -44,8 +47,21 @@ export interface GeneratedImageResult {
   id: string;
   prompt: string;
   imageUrl: string;
+  sourceImageUrl?: string;
   aspectRatio: string;
   createdAt: string;
+  isEdited?: boolean;
+}
+
+export interface GeneratedVideoResult {
+  id: string;
+  prompt: string;
+  sourceImageUrl?: string;
+  videoUrl: string;
+  aspectRatio: string;
+  resolution: string;
+  createdAt: string;
+  model: string;
 }
 
 export interface SearchResult {
@@ -103,3 +119,65 @@ export interface SystemStats {
   tokenUsage: number;
   serverStatus: 'Online' | 'Degraded' | 'Offline';
 }
+
+export type TaskNodeType =
+  | 'image_gen'
+  | 'video_anim'
+  | 'summary'
+  | 'prompt'
+  | 'audio_tts'
+  | 'code_gen'
+  | 'translate';
+
+export type NodeExecutionStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed';
+
+export interface WorkflowTaskNode {
+  id: string;
+  type: TaskNodeType;
+  title: string;
+  customLabel?: string;
+  x: number;
+  y: number;
+  status: NodeExecutionStatus;
+  progress?: number;
+  elapsedSec?: number;
+  error?: string;
+  config: {
+    prompt?: string;
+    aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3';
+    resolution?: '720p' | '1080p';
+    model?: string;
+    action?: string;
+    voice?: string;
+    temperature?: number;
+    language?: string;
+    inheritInput?: boolean;
+    useCustomInput?: boolean;
+  };
+  output?: {
+    text?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    audioBase64?: string;
+    bulletPoints?: string[];
+    metadata?: Record<string, any>;
+    timestamp?: string;
+  };
+}
+
+export interface WorkflowEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label?: string;
+}
+
+export interface WorkflowPreset {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+  nodes: WorkflowTaskNode[];
+  edges: WorkflowEdge[];
+}
+

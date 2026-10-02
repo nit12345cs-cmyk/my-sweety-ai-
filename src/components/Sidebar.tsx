@@ -16,7 +16,9 @@ import {
   PanelLeftOpen,
   Clock,
   LogOut,
-  User
+  User,
+  Wand2,
+  Film
 } from 'lucide-react';
 import { ModuleType, ChatSession } from '../types';
 
@@ -138,17 +140,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const ALL_MODULES: { id: ModuleType; title: string; subtitle: string; icon: React.FC<any>; badge?: string }[] = [
+  const CORE_MODULES: { id: ModuleType; title: string; subtitle: string; icon: React.FC<any>; badge?: string }[] = [
     {
-      id: 'admin',
-      title: isTamil ? 'நிர்வாக போர்ட்டல்' : 'Enterprise Admin',
-      subtitle: isTamil ? 'பயன்பாடு & பாதுகாப்பு' : 'Metrics & Security',
-      icon: ShieldCheck,
-      badge: 'SUPER',
+      id: 'chat',
+      title: isTamil ? 'AI சாட் ஹப்' : 'AI Chat Hub',
+      subtitle: isTamil ? 'ஸ்மார்ட் உதவியாளர்' : 'Smart Assistant',
+      icon: MessageSquare,
+    },
+    {
+      id: 'image',
+      title: isTamil ? 'பட உருவாக்கம் & திருத்தம்' : 'Create & Edit Images',
+      subtitle: isTamil ? 'ஜெமினி 3.1 ஃபிளாஷ்' : 'Gemini 3.1 Flash',
+      icon: Wand2,
+      badge: 'GEMINI',
+    },
+    {
+      id: 'video',
+      title: isTamil ? 'வீடியோ அனிமேஷன்' : 'Animate to Video',
+      subtitle: isTamil ? 'கூகிள் Veo ஏஐ' : 'Google Veo AI',
+      icon: Film,
+      badge: 'VEO',
+    },
+    {
+      id: 'website',
+      title: isTamil ? 'வலைத்தள பில்டர்' : 'AI Website Studio',
+      subtitle: isTamil ? 'முழு வடிவமைப்பு' : 'Live HTML Studio',
+      icon: Globe,
+    },
+    {
+      id: 'voice',
+      title: isTamil ? 'குரல் உதவி' : 'Voice Assistant',
+      subtitle: isTamil ? 'நேரடி ஆடியோ' : 'Real-time Audio',
+      icon: Mic,
+    },
+    {
+      id: 'workflow',
+      title: isTamil ? 'வொர்க்ஃப்ளோ மேனேஜர்' : 'Workflow Manager',
+      subtitle: isTamil ? 'செயின் AI பணிகள்' : 'Sequential AI Chains',
+      icon: Layers,
+      badge: 'DAG',
     },
   ];
 
-  const MODULES = isAdmin ? ALL_MODULES : [];
+  const ADMIN_MODULE: { id: ModuleType; title: string; subtitle: string; icon: React.FC<any>; badge?: string } = {
+    id: 'admin',
+    title: isTamil ? 'நிர்வாக போர்ட்டல்' : 'Enterprise Admin',
+    subtitle: isTamil ? 'பயன்பாடு & பாதுகாப்பு' : 'Metrics & Security',
+    icon: ShieldCheck,
+    badge: 'SUPER',
+  };
+
+  const MODULES = isAdmin ? [...CORE_MODULES, ADMIN_MODULE] : CORE_MODULES;
 
   const filteredSessions = savedSessions.filter(
     (s) =>

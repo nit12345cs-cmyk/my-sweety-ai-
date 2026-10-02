@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cpu, Server, Activity, ShieldCheck, Flame } from 'lucide-react';
+import { Cpu, Server, Activity, ShieldCheck, Flame, Keyboard } from 'lucide-react';
 
 export const FooterBar: React.FC = () => {
   return (
@@ -11,10 +11,10 @@ export const FooterBar: React.FC = () => {
         </span>
       </div>
 
-      <div className="flex items-center gap-4 text-slate-400">
+      <div className="flex items-center gap-3 text-slate-400">
         <div className="hidden md:flex items-center gap-1.5 bg-slate-900/80 border border-slate-800/80 px-2 py-0.5 rounded-md">
           <Cpu className="w-3 h-3 text-amber-400" />
-          <span className="text-slate-200">Gemini 3.6 Flash (Resilient)</span>
+          <span className="text-slate-200">Gemini 3.7 Flash</span>
         </div>
         <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-800/80 px-2 py-0.5 rounded-md">
           <Activity className="w-3 h-3 text-emerald-400" />
@@ -22,8 +22,19 @@ export const FooterBar: React.FC = () => {
         </div>
         <div className="hidden lg:flex items-center gap-1.5 bg-slate-900/80 border border-slate-800/80 px-2 py-0.5 rounded-md">
           <ShieldCheck className="w-3 h-3 text-indigo-400" />
-          <span className="text-indigo-300">Enterprise Encrypted & Secured</span>
+          <span className="text-indigo-300">Enterprise Encrypted</span>
         </div>
+
+        {/* Clickable Keyboard Shortcuts Trigger */}
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('swatea:open_shortcuts'))}
+          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/50 text-slate-300 hover:text-amber-300 px-2.5 py-0.5 rounded-md transition-colors cursor-pointer"
+          title="Open Keyboard Shortcuts Modal (Cmd/Ctrl + K)"
+        >
+          <Keyboard className="w-3 h-3 text-amber-400" />
+          <span>Shortcuts</span>
+          <kbd className="text-[9px] bg-slate-950 px-1 rounded border border-slate-800 text-slate-400">⌘K</kbd>
+        </button>
       </div>
     </footer>
   );

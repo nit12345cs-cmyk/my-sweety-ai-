@@ -1,6 +1,6 @@
 {
   "name": "Swatea AI",
-  "description": "Enterprise AI Operating System featuring AI Chat, Deep Search, Coding Studio, Document AI, Vision, Voice Assistant, Workflow Automation, and Team Analytics.",
+  "description": "Enterprise AI Operating System featuring Gemini 3.1 Flash Image Creation & Editing, Google Veo Video Animation, AI Website Studio, and Voice Assistant.",
   "requestFramePermissions": [
     "microphone",
     "camera"

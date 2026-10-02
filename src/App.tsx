@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ChatModule } from './components/ChatModule';
+import { ImageModule } from './components/ImageModule';
+import { VideoModule } from './components/VideoModule';
 import { WebsiteModule } from './components/WebsiteModule';
 import { VoiceModule } from './components/VoiceModule';
+import { WorkflowManager } from './components/WorkflowManager';
 import { AdminModule } from './components/AdminModule';
 import { FooterBar } from './components/FooterBar';
 import { LoginView } from './components/LoginView';
@@ -11,6 +14,12 @@ import { ModuleType, LanguageCode, ThemeType } from './types';
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('chat');
+  const [videoPreload, setVideoPreload] = useState<{ image: string; prompt: string } | null>(null);
+
+  const handleNavigateToVideo = (imageUrl: string, promptText: string) => {
+    setVideoPreload({ image: imageUrl, prompt: promptText });
+    setActiveModule('video');
+  };
   const [theme, setTheme] = useState<ThemeType>(() => {
     try {
       const saved = localStorage.getItem('swatea_theme');
@@ -57,7 +66,16 @@ export default function App() {
       console.error(e);
     }
   };
-  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('swatea_last_user_email');
+      if (saved !== null) return saved;
+      // Default to user's email for instant open access
+      return 'sathishkumar0076767@gmail.com';
+    } catch {
+      return 'sathishkumar0076767@gmail.com';
+    }
+  });
 
   const ADMIN_EMAILS = ['sathishkumar0076767@gmail.com', 'admin@swatea.ai'];
   const isAdmin = Boolean(currentUserEmail && ADMIN_EMAILS.includes(currentUserEmail.toLowerCase().trim()));
@@ -70,7 +88,7 @@ export default function App() {
 
   const handleLogin = (email: string) => {
     try {
-      localStorage.setItem('swatea_user_email', email);
+      localStorage.setItem('swatea_last_user_email', email);
     } catch (e) {
       console.error(e);
     }
@@ -79,10 +97,8 @@ export default function App() {
 
   const handleLogout = () => {
     try {
-      localStorage.removeItem('swatea_user_email');
-    } catch (e) {
-      console.error(e);
-    }
+      localStorage.removeItem('swatea_last_user_email');
+    } catch (e) {}
     setCurrentUserEmail(null);
   };
 
@@ -90,10 +106,16 @@ export default function App() {
     switch (activeModule) {
       case 'chat':
         return language === 'ta' ? 'AI சாட் ஹப் (Chat Hub)' : 'AI Chat Hub';
+      case 'image':
+        return language === 'ta' ? 'பட உருவாக்கம் & திருத்தம் (Gemini 3.1 Flash Image)' : 'Create & Edit Images (Gemini 3.1 Flash)';
+      case 'video':
+        return language === 'ta' ? 'வீடியோ அனிமேஷன் (Google Veo Video Studio)' : 'Animate to Video (Google Veo Studio)';
       case 'website':
         return language === 'ta' ? 'AI வெப்சைட் பில்டர் (Website Studio)' : 'AI Website Studio';
       case 'voice':
         return language === 'ta' ? 'குரல் உதவி (Voice Assistant)' : 'Voice & Audio Assistant';
+      case 'workflow':
+        return language === 'ta' ? 'வொர்க்ஃப்ளோ மேனேஜர் (Sequential AI Task Chains)' : 'AI Workflow Manager (Sequential Task Chains)';
       case 'admin':
         return language === 'ta' ? 'நிர்வாக போர்ட்டல் (Enterprise Admin)' : 'Enterprise Admin Portal';
       default:
@@ -151,8 +173,24 @@ export default function App() {
           {activeModule === 'chat' && (
             <ChatModule language={language} currentUserEmail={currentUserEmail} />
           )}
+          {activeModule === 'image' && (
+            <ImageModule language={language} onNavigateToVideo={handleNavigateToVideo} />
+          )}
+          {activeModule === 'video' && (
+            <VideoModule
+              language={language}
+              initialImage={videoPreload?.image}
+              initialPrompt={videoPreload?.prompt}
+            />
+          )}
           {activeModule === 'website' && <WebsiteModule language={language} />}
           {activeModule === 'voice' && <VoiceModule language={language} />}
+          {activeModule === 'workflow' && (
+            <WorkflowManager
+              language={language}
+              onNavigateToVideo={handleNavigateToVideo}
+            />
+          )}
           {activeModule === 'admin' && (
             <AdminModule
               language={language}

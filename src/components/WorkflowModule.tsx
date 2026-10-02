@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { Workflow, Zap, Sparkles, CheckCircle2, Circle, ArrowRight, ShieldCheck, Play, RefreshCw, Layers } from 'lucide-react';
+import { Workflow, Zap, Sparkles, CheckCircle2, Circle, ArrowRight, ShieldCheck, Play, RefreshCw, Layers, LayoutGrid } from 'lucide-react';
 import { LanguageCode } from '../types';
 import { safeFetchJson } from '../lib/api';
+import { WorkflowManager } from './WorkflowManager';
+
+export { WorkflowManager };
 
 interface WorkflowModuleProps {
   language: LanguageCode;
+  onNavigateToVideo?: (imageUrl: string, promptText: string) => void;
 }
 
 interface WorkflowNode {
@@ -15,8 +19,9 @@ interface WorkflowNode {
   logs: string;
 }
 
-export const WorkflowModule: React.FC<WorkflowModuleProps> = ({ language }) => {
+export const WorkflowModule: React.FC<WorkflowModuleProps> = ({ language, onNavigateToVideo }) => {
   const isTamil = language === 'ta';
+  const [viewMode, setViewMode] = useState<'canvas' | 'planner'>('canvas');
 
   const [goal, setGoal] = useState(
     isTamil
@@ -35,6 +40,28 @@ export const WorkflowModule: React.FC<WorkflowModuleProps> = ({ language }) => {
     { id: 4, name: 'Action Dispatcher', role: 'API Execution & Notification', status: 'idle', logs: 'Sending automated dispatch...' },
   ]);
   const [isRunningSim, setIsRunningSim] = useState(false);
+
+  if (viewMode === 'canvas') {
+    return (
+      <div className="h-full flex flex-col relative">
+        <div className="absolute top-3.5 right-48 z-30 hidden sm:flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+          <button
+            onClick={() => setViewMode('canvas')}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-amber-500 text-slate-950"
+          >
+            {isTamil ? 'நோட் செயின்' : 'Node Canvas'}
+          </button>
+          <button
+            onClick={() => setViewMode('planner')}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white"
+          >
+            {isTamil ? 'ஏஜென்ட் பிளானர்' : 'Agent Planner'}
+          </button>
+        </div>
+        <WorkflowManager language={language} onNavigateToVideo={onNavigateToVideo} />
+      </div>
+    );
+  }
 
   const handleGenerateWorkflow = async () => {
     if (!goal.trim()) return;
@@ -86,16 +113,32 @@ export const WorkflowModule: React.FC<WorkflowModuleProps> = ({ language }) => {
   return (
     <div className="h-full flex flex-col bg-slate-950 rounded-2xl border border-slate-800/80 overflow-y-auto p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
-          <Workflow className="w-6 h-6 text-amber-400" />
-          <span>{isTamil ? 'தானியங்கி வொர்க்ஃப்ளோ & ஏஜென்ட் ஸ்டுடியோ' : 'Swatea Autonomous Agent & Workflow Studio'}</span>
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          {isTamil
-            ? 'சிக்கலான நிறுவனப் பணிகளைத் தானியங்கி ஏஜென்ட் DAG சுழற்சிகளாக மாற்றுங்கள்.'
-            : 'Design multi-step autonomous agent execution graphs (DAGs) for automated enterprise processes.'}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+            <Workflow className="w-6 h-6 text-amber-400" />
+            <span>{isTamil ? 'தானியங்கி வொர்க்ஃப்ளோ & ஏஜென்ட் ஸ்டுடியோ' : 'Swatea Autonomous Agent & Workflow Studio'}</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            {isTamil
+              ? 'சிக்கலான நிறுவனப் பணிகளைத் தானியங்கி ஏஜென்ட் DAG சுழற்சிகளாக மாற்றுங்கள்.'
+              : 'Design multi-step autonomous agent execution graphs (DAGs) for automated enterprise processes.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+          <button
+            onClick={() => setViewMode('canvas')}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white"
+          >
+            {isTamil ? 'நோட் செயின்' : 'Node Canvas'}
+          </button>
+          <button
+            onClick={() => setViewMode('planner')}
+            className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-amber-500 text-slate-950"
+          >
+            {isTamil ? 'ஏஜென்ட் பிளானர்' : 'Agent Planner'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

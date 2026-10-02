@@ -29,7 +29,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
 }) => {
   const isTamil = language === 'ta';
   const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    try {
+      return localStorage.getItem('swatea_last_user_email') || 'sathishkumar0076767@gmail.com';
+    } catch {
+      return 'sathishkumar0076767@gmail.com';
+    }
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -355,6 +361,32 @@ export const LoginView: React.FC<LoginViewProps> = ({
             )}
           </button>
         </form>
+
+        {/* Quick Demo & Admin Accounts Shortcut */}
+        <div className="space-y-2 pt-2 border-t border-slate-800/80">
+          <p className="text-[11px] font-bold text-slate-400 font-mono flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>{isTamil ? 'விரைவு உள்நுழைவு (Quick 1-Click Login):' : 'Quick 1-Click Login:'}</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleQuickSelect({ email: 'sathishkumar0076767@gmail.com', pass: 'admin123456' })}
+              className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-left transition-all cursor-pointer group"
+            >
+              <div className="text-[11px] font-bold text-amber-300 group-hover:text-amber-200 truncate">👑 Sathish (Admin)</div>
+              <div className="text-[9px] text-slate-400 font-mono truncate">sathishkumar0076767@gmail.com</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickSelect({ email: 'user@gmail.com', pass: 'user123456' })}
+              className="px-3 py-2 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 rounded-xl text-left transition-all cursor-pointer group"
+            >
+              <div className="text-[11px] font-bold text-slate-200 group-hover:text-white truncate">⚡ Demo User</div>
+              <div className="text-[9px] text-slate-400 font-mono truncate">user@gmail.com</div>
+            </button>
+          </div>
+        </div>
 
         {/* Footer info */}
         <div className="text-center text-[10px] text-slate-600 font-mono pt-2 border-t border-slate-800/60">
